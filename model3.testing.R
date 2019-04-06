@@ -42,19 +42,18 @@ object.testing <- function(dataframe, labels, grp.names, opti.Ks, kpairs, final.
     final.prs.test <- opti.RFs(prs.table.test, grp.names)
     final.prs.test$predict.grp <- colnames(final.prs.test)[apply(final.prs.test, 1, which.max)] -> predictionLabels.test
     
+    
     # Performances
     cm <- confusionMatrix(data=as.factor(predictionLabels.test), reference=as.factor(labels))
     test.acc <- as.numeric(cm$overall['Accuracy'])
-
     sensitivity <- as.numeric(cm$byClass[, 1])
     specificity <- as.numeric(cm$byClass[, 2])
     youden <- sensitivity + specificity - 1
     names(youden) <- gsub('Class: ', '', rownames(cm$byClass))
     test.results[[as.character(k)]]$ACC <-  test.acc
     test.results[[as.character(k)]]$Youden <- youden
-    test.results[[as.character(k)]]$bestModels <- cv.results[[i]][[as.character(k)]][['RFmodels']]
+    test.results[[as.character(k)]]$predictionPrsTable <- prs.table.test
     test.results[[as.character(k)]]$cm <- cm
-
   }
   print(paste0(k, " - the best ACC:", round(test.results[[as.character(k)]]$ACC, 5)))
   test.results
