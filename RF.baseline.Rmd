@@ -1,0 +1,367 @@
+---
+title: "Classical Random Forest for multi-class prediction"
+date: "4/10/2019"
+output: html_document
+---
+
+There are two processed datasets already:
+
+1. TCGA BRCA RNA-seq with 1095 tumoral samples and their PAM50 subtypes were assigned using `genefu` package
+2. MetaBric microarray with 1975 breast tumoral samples
+
+
+Here I just build the classical Random forest model for biological data, which means using the expression values as input, then its performaces will compare to those of our non-parametric rfTSP model as a baseline.
+
+
+```{R pkg}
+suppressPackageStartupMessages({
+  library(randomForest)
+  library(dplyr)
+  library(caret)
+  library(pROC)
+  library(ggpubr)
+  library(tidyr)
+  library(stringr)
+  library(reshape2)
+})
+```
+
+
+```{R set up}
+main.dir <- "~/ktsp"
+data.dir <- file.path(main.dir, "data")
+save.dir <- file.path(main.dir, "multi.results/RF.model")
+source(file.path(main.dir, "script/utils.R"))
+
+# Load processed data
+load(file.path(data.dir, "BRCA.expr.Rdata"))
+load(file.path(data.dir, "BRCA.clinic.Rdata"))
+load(file.path(data.dir, "MB.expr.Rdata"))
+load(file.path(data.dir, "MB.clinic.Rdata"))
+```
+
+
+```{R setting}
+mb.labels <- factor(mb.clinic$NOT_IN_OSLOVAL_Pam50Subtype)
+brca.labels <- factor(brca.clinic$final_assign)
+```
+
+
+## Cohort demography
+Expression datasets had been intersected.
+```{R}
+dim(brca.expr); dim(mb.expr)
+
+st.count1 <- brca.clinic %>% group_by(final_assign) %>% summarise(counts = n())
+st.count1 <- as.data.frame(st.count1 %>% mutate(data = rep("TCGA", nrow(st.count1))))
+st.count2 <- mb.clinic %>% group_by(NOT_IN_OSLOVAL_Pam50Subtype) %>% summarise(counts = n())
+st.count2 <- as.data.frame(st.count2 %>% mutate(data = rep("MetaBric", nrow(st.count2))))
+colnames(st.count2) <- colnames(st.count1)
+st.count <- rbind.data.frame(st.count1, st.count2)
+
+ggplot(st.count, aes(x = final_assign, y = counts, fill = data)) +
+  geom_bar(stat = "identity", position=position_dodge()) +
+  geom_text(aes(final_assign, counts, label = counts), position=position_dodge(width = 1), vjust = -0.2) +
+  scale_y_continuous(limits=c(0, 800)) + 
+  theme_bw() +
+  labs(title="Sample numbers in each subtype", x="", y="", fill="Data") + 
+  scale_fill_brewer(palette="Set1")
+
+```
+
+## Training using MetaBric, testing using TCGA
+
+### Filter genes
+75% low mean ranks shoule be filtered out.
+```{R filter, eval=T}
+# Filter low mean genes
+sub.genes1 <- lowMeans.filter(mb.expr, 25)
+mb.train <- mb.expr[sub.genes1, ]
+brca.test <- brca.expr[sub.genes1, ]
+```
+
+
+### Normalize data
+```{R norm, fig.width=10}
+# Data we have
+dens.plot <- function(table, colVec, yrange) {
+  d <- plot(density(table[, 1]), col=colVec[1], 
+          lwd=2, las=2, ylim=yrange, main="", xlab="") +
+      abline(v=0, lty=3) + title(xlab="expr values") +
+      for (i in 2:ncol(table)) {
+        den <- density(table[, i])
+        lines(den$x, den$y, col=colVec[i], lwd=2)
+      } 
+  d
+}
+
+par(mfrow=c(1, 2), las=1)
+dens.plot(brca.expr, getColors(ncol(brca.expr)), c(0, 0.6))
+dens.plot(mb.expr, getColors(ncol(mb.expr)), c(0, 0.6))
+```
+
+### Before quantile normalization
+```{R qn0}
+countDis <- function(countMat1, countMat2, labels) {
+  ga.count1 <- countMat1 %>% gather(ID)
+  ga.count1$Data <- labels[1]
+  ga.count2 <- countMat2 %>% gather(ID)
+  ga.count2$Data <- labels[2]
+  
+  count.df <- rbind.data.frame(ga.count1, ga.count2)
+  mu <- count.df %>%
+    select(value, Data) %>%
+    group_by(Data) %>%
+    summarise(mean.count = mean(value, na.rm = T))
+  
+  ggplot(count.df, aes(x=value, color=Data, fill=Data)) + 
+    geom_histogram(aes(y=..density..), alpha=.5, binwidth=0.6) +
+    geom_density(alpha=0.2) +
+    geom_vline(data=mu, aes(xintercept=mean.count, color=Data), linetype='dashed') + 
+    scale_fill_brewer(palette="Set1") + 
+    scale_color_brewer(palette="Set1") + theme_bw() +
+    labs(x='Count', y='Density')
+}
+
+countDis(brca.test, mb.train, c('TCGA', 'MetaBric'))
+```
+
+### After quantile normalization
+MetaBric microarray as reference dataset, BRCA RNA-seq as target dataset.
+
+The `preprocessCore` cannot be installed while running Rmd on HTC, so I just save the normalized data first then load them for the following analyses.
+```{R qn, eval=F}
+library(preprocessCore)
+nm.mb.train <- normalize.quantiles(as.matrix(mb.train), copy=F) 
+target <- normalize.quantiles.determine.target(nm.mb.train)
+nm.brca.test <- normalize.quantiles.use.target(as.matrix(brca.test), target)
+
+nm.mb.train <- as.data.frame(nm.mb.train)
+nm.brca.test <- as.data.frame(nm.brca.test)
+rownames(nm.brca.test) <- rownames(brca.test)
+colnames(nm.brca.test) <- colnames(brca.test)
+
+save(nm.mb.train, nm.brca.test, file=file.path(save.dir, "mb.training.Rdata"))
+```
+
+```{R qn2}
+load(file.path(save.dir, "mb.training.Rdata"))
+countDis(nm.brca.test, nm.mb.train, c('TCGA', 'MetaBric'))
+```
+
+
+### MetaBric Random Forest 
+5-fold cross validation
+```{R, eval=T}
+RandomForest.CV <- function(data.train, labels.train) {
+  results.list <- list()
+  data.train <- cbind.data.frame(data.train, type=labels.train)
+  folds <- createFolds(labels.train, k=5)
+  
+  for (i in 1:5) {
+    results.list[[as.character(i)]] <- list()
+    
+    # 1/5 for validation, 4/5 for training
+    cv.train <- data.train[-folds[[i]], ]
+    cv.train.labels <- labels.train[-folds[[i]]]
+    cv.valid <- data.train[folds[[i]], ]
+    cv.valid.labels <- labels.train[folds[[i]]]
+    
+    # Build the model
+    rf.model <- randomForest(type~., data=cv.train, ntree=500, replace=F)
+    predictionLabels <- predict(rf.model, newdata=cv.valid, type='response')
+    predictionScores <- predict(rf.model, newdata=cv.valid, type='prob')
+    
+    # Save performances
+    cm <- confusionMatrix(data=as.factor(predictionLabels), reference=as.factor(cv.valid.labels))
+    sensitivity <- as.numeric(cm$byClass[, 1])
+    specificity <- as.numeric(cm$byClass[, 2])
+    youden <- sensitivity + specificity - 1
+    names(youden) <- gsub('Class: ', '', rownames(cm$byClass))
+    results.list[[i]][['trueLabels']] <- cv.valid.labels
+    results.list[[i]][['predictionLabels']] <- predictionLabels
+    results.list[[i]][['predictionScores']] <- predictionScores
+    results.list[[i]][['ConfusionMatrix']] <- cm
+    results.list[[i]][['ACC']] <- as.numeric(cm$overall['Accuracy'])
+    results.list[[i]][['Youden']] <- youden
+    results.list[[i]][['model']] <- rf.model
+    
+    print(paste0("Fold ", i, " ACC:", round(results.list[[i]][['ACC']], 5)))
+  }
+  results.list
+}
+
+mb.cv <- RandomForest.CV(as.data.frame(t(nm.mb.train)), mb.labels)
+```
+
+
+### CV performances
+```{R cv perf, fig.height=7}
+getOverall <- function(results.list) {
+  overall.results <- list()
+  
+  all.true.labels <- c()
+  all.predict.labels <- c()
+  all.predict.scores <- c()
+  for (f in 1:length(results.list)) {
+    all.true.labels <- c(all.true.labels, as.character(results.list[[f]][['trueLabels']]))
+    all.predict.labels <- c(all.predict.labels, as.character(results.list[[f]][['predictionLabels']]))
+    all.predict.scores <- rbind(all.predict.scores, results.list[[f]][['predictionScores']])
+  }
+  
+  all.cm <- confusionMatrix(data=as.factor(all.predict.labels), reference=as.factor(all.true.labels))
+  overall.results[['ACC']] <- as.numeric(all.cm$overall['Accuracy'])
+  overall.results[['Sensitivity']] <- as.numeric(all.cm$byClass[, 1]) -> all.sens
+  overall.results[['Specificity']] <- as.numeric(all.cm$byClass[, 2]) -> all.spec
+  all.youden <- all.sens + all.spec - 1
+  names(all.youden) <- gsub('Class: ', '', rownames(all.cm$byClass))
+  overall.results[['Youden']] <- all.youden
+  overall.results[['predictionScores']] <- all.predict.scores
+  overall.results[['cm']] <- all.cm
+  overall.results[['trueLabels']] <- all.true.labels
+  overall.results
+}
+
+
+prob.jitt <- function(overall, label.df) {
+  grp.order <- c('Basal', 'Her2', 'LumA', 'LumB', 'Normal')
+  prs.table <- as.data.frame(overall[["predictionScores"]])
+  if ('predict.grp' %in% colnames(prs.table)) prs.table <- prs.table[, names(prs.table) != 'predict.grp'] 
+  prs.table <- prs.table[, grp.order]
+  prs.table <- merge(prs.table, label.df, by=0)
+  plot.df <- prs.table[, -1]
+  plot.df <- melt(plot.df, id.vars = colnames(label.df))
+  colnames(plot.df) <- c("true_label", "Pred_Type", "variable")
+  
+  ggplot(plot.df, aes(x=Pred_Type, y=variable, color=Pred_Type, shape=Pred_Type)) + 
+    geom_jitter(position=position_jitter(0.2), cex=.5) + 
+    scale_y_continuous(breaks = seq(0, 1, by=0.25), limits = c(-0.005, 1.005)) +
+    facet_wrap(~true_label) + theme_bw() + 
+    scale_color_brewer(palette="Dark2") + 
+    theme(axis.text.x=element_blank(), axis.ticks.x=element_blank()) +
+    labs(x="Predictive Type", y="Probability") 
+}
+
+
+mb.overall <- getOverall(mb.cv)
+print(mb.overall$ACC); print(mb.overall$cm); print(mb.overall$Youden)
+prob.jitt(mb.overall, mb.clinic[, "NOT_IN_OSLOVAL_Pam50Subtype", drop = F])
+```
+
+### Testing on TCGA
+```{R testing, fig.height=7}
+# Train a model using whole training data
+trainModel <- function(data.train, labels.train) {
+  data.train <- cbind.data.frame(data.train, type=labels.train)
+  full.model <- randomForest(type~., data = data.train, ntree = 500, replace = F)
+  full.model
+}
+
+
+# Test on testing data
+testing <- function(data.test, labels.test, model) {
+  test.results <- list()
+  data.test <- cbind.data.frame(data.test, type=labels.test)
+  
+  predictionLabels.test <- predict(model, newdata = data.test, type = 'response')
+  predictionLabels.test <- factor(predictionLabels.test, levels = levels(labels.test))
+  predictionScores.test <- predict(model, newdata = data.test, type = 'prob')
+  
+  cm <- confusionMatrix(data=predictionLabels.test, reference=labels.test)
+  sensitivity <- as.numeric(cm$byClass[, 1])
+  specificity <- as.numeric(cm$byClass[, 2])
+  youden <- sensitivity + specificity - 1
+  names(youden) <- gsub('Class: ', '', rownames(cm$byClass))
+  test.acc <- as.numeric(cm$overall['Accuracy'])
+  
+  test.results[['ACC']] <- test.acc
+  test.results[['predictionLabels']] <- predictionLabels.test
+  test.results[['predictionScores']] <- predictionScores.test
+  test.results[['cm']] <- cm
+  test.results[['Youden']] <- youden
+  print(paste0("ACC:", round(test.results$ACC, 5)))
+  test.results
+}
+
+
+mb.full.model <- trainModel(as.data.frame(t(nm.mb.train)), mb.labels)
+brca.test.results <- testing(as.data.frame(t(nm.brca.test)), brca.labels, mb.full.model)
+print(brca.test.results$ACC); print(brca.test.results$cm); print(brca.test.results$Youden)
+prob.jitt(brca.test.results, brca.clinic[, "final_assign", drop = F])
+```
+
+
+### Save into Rdata
+```{R save1}
+save(mb.cv, mb.full.model, brca.test.results, file=file.path(save.dir, "RF.mbTrain.Rdata"))
+```
+
+
+## Training using TCGA, testing using MetaBric
+
+### Filter genes
+I think genes in the 75% low mean ranks shoule be filtered out. I can try both filter or not.
+```{R filter2}
+sub.genes2 <- lowMeans.filter(brca.expr, 25)
+brca.train <- brca.expr[sub.genes2, ]
+mb.test <- mb.expr[sub.genes2, ]
+```
+
+
+### Normalize data
+
+```{R}
+countDis(brca.train, mb.test, c('TCGA', 'MetaBric'))
+```
+
+BRCA as reference dataset, MetaBric as target dataset
+```{R, eval=F}
+nm.brca.train <- normalize.quantiles(as.matrix(brca.train), copy=F) 
+target <- normalize.quantiles.determine.target(nm.brca.train)
+nm.mb.test <- normalize.quantiles.use.target(as.matrix(mb.test), target)
+
+nm.brca.train <- as.data.frame(nm.brca.train)
+nm.mb.test <- as.data.frame(nm.mb.test)
+rownames(nm.mb.test) <- rownames(mb.test)
+colnames(nm.mb.test) <- colnames(mb.test)
+save(nm.brca.train, nm.mb.test, file=file.path(save.dir, "tcga.training.Rdata"))
+````
+
+```{R}
+load(file.path(save.dir, "tcga.training.Rdata"))
+countDis(nm.brca.train, nm.mb.test, c('TCGA', 'MetaBric'))
+```
+
+
+### TCGA Random Forest 
+5-fold cross validation
+```{R}
+brca.cv <- RandomForest.CV(as.data.frame(t(nm.brca.train)), brca.labels)
+```
+
+
+### CV performances
+```{R, fig.height=7}
+brca.overall <- getOverall(brca.cv)
+print(brca.overall$ACC); print(brca.overall$cm); print(brca.overall$Youden)
+prob.jitt(brca.overall, brca.clinic[, "final_assign", drop = F])
+```
+
+
+### Testing on MetaBric
+```{R, fig.height=7}
+brca.full.model <- trainModel(as.data.frame(t(nm.brca.train)), brca.labels)
+mb.test.results <- testing(as.data.frame(t(nm.mb.test)), mb.labels, brca.full.model)
+print(mb.test.results$ACC); print(mb.test.results$cm); print(mb.test.results$Youden)
+prob.jitt(mb.test.results, mb.clinic[, "NOT_IN_OSLOVAL_Pam50Subtype", drop = F])
+```
+
+
+### Save into Rdata
+```{R save2}
+save(brca.cv, brca.full.model, mb.test.results, file=file.path(save.dir, "RF.tcgaTrain.Rdata"))
+```
+
+
+
+
