@@ -7,16 +7,13 @@ save.dir <- file.path(main.dir, "data")
 
 # TCGA 
 brca.expr <- get(load(file.path(data.dir, "brcaTCGAtpm_log2_uniquePrimaries.Rda")))
-rm(brcaTCGAtpm_log2_primaries_unique)
 brca.clinic <- get(load(file.path(data.dir, "TCGA_PAM50_histology_TumorPurity.rda")))
-rm(TCGA_PAM50)
 
 
 # MetaBric
 mb.expr <- get(load(file.path(data.dir, "MetaBric_processed_Li.RData")))
-rm(MetaBric)
 mb.clinic <- get(load(file.path(data.dir, "Complete_METABRIC_Clinical_Features_Data (1).rbin")))
-rm(Complete_METABRIC_Clinical_Features_Data)
+rm(brcaTCGAtpm_log2_primaries_unique, TCGA_PAM50, MetaBric, Complete_METABRIC_Clinical_Features_Data)
 
 
 # Intersect with two datasets
@@ -42,12 +39,14 @@ rownames(mb.expr) <- gsub("-", "_", rownames(mb.expr))
 
 # Delete normal-like tumoral samples (4/23 update)
 brca.clinic <- brca.clinic[brca.clinic$final_assign != 'Normal', ]
+brca.clinic$final_assign <- factor(brca.clinic$final_assign)
 dim(brca.clinic) # 1060 5
 brca.expr <- brca.expr[, match(rownames(brca.clinic), colnames(brca.expr))]
 dim(brca.expr) # 18202 1060
 all(rownames(brca.clinic) == colnames(brca.expr)) # TRUE
 
 mb.clinic <- mb.clinic[mb.clinic$NOT_IN_OSLOVAL_Pam50Subtype != 'Normal', ]
+mb.clinic$NOT_IN_OSLOVAL_Pam50Subtype <- factor(mb.clinic$NOT_IN_OSLOVAL_Pam50Subtype)
 dim(mb.clinic) # 1775 25
 mb.expr <- mb.expr[, match(rownames(mb.clinic), colnames(mb.expr))]
 dim(mb.expr) # 18202  1775
