@@ -588,7 +588,7 @@ trainModel <- function(dataframe, labels, Ks, grp.names, kpairs, no.model, basel
 testing <- function(testdata, testLabels, Ks, grp.names, kpairs, full.model, no.model, baseline=FALSE) {
   test.results <- list()
   if (baseline == TRUE) {
-    data.test <- cbind.data.frame(testdata, type=testLabels)
+    testdata <- cbind.data.frame(testdata, type=testLabels)
     
     predictionLabels.test <- predict(full.model, newdata = testdata, type = 'response')
     predictionLabels.test <- factor(predictionLabels.test, levels = levels(testLabels))
