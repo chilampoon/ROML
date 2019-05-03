@@ -17,6 +17,7 @@ suppressPackageStartupMessages({
   library(randomForest)
   library(nloptr)
   library(ggpubr)
+  library(RColorBrewer)
 })
 ```
 
@@ -282,7 +283,6 @@ tsp.rf.cv <- function(nfold, Ks, labels, dataframe, grp.names, kpairs, no.model)
   # Create folds
   folds <- createFolds(labels, k = nfold)
   results.list <- list()
-  grp.names <- as.character(grp.names)
   
   # Outer loop for cross-validation
   # Intermediate loop for different Ks
@@ -297,7 +297,6 @@ tsp.rf.cv <- function(nfold, Ks, labels, dataframe, grp.names, kpairs, no.model)
     
     for (K in Ks) {
       results.list[[i]][[as.character(K)]] <- list()
-      results.list[[i]][[as.character(K)]][['RFmodels']] <- list()
       all.tsp <- kpairs[[as.character(K)]]
       #results.list[[i]][[as.character(K)]][['kpairs']] <- all.tsp
       
@@ -317,7 +316,8 @@ tsp.rf.cv <- function(nfold, Ks, labels, dataframe, grp.names, kpairs, no.model)
         }
         
         # Build random forest
-        rf.model <- randomForest(type~., data = bi.cv.train, ntree = 500, replace = F) # tuned later
+        rf.model <- randomForest(type~., data = bi.cv.train, ntree = 500, replace = F) 
+        results.list[[i]][[as.character(K)]][['RFmodels']] <- rf.model
         predictionLabels <- predict(rf.model, newdata=bi.cv.validate, type='response')
         predictionPrs <- predict(rf.model, newdata=bi.cv.validate, type='prob')
 
@@ -450,33 +450,58 @@ opti.RFs <- function(prs.table, grp.names) {
 
 
 # Get overall values of performances from CV results
-getOverall <- function(results.list, Ks) {
+getOverall <- function(results.list, Ks, baseline=FALSE) {
   overall <- list()
   
-  for (k in 1:length(Ks)) {
-    K <- Ks[k]
-    overall[[as.character(K)]] <- list()
+  if (baseline == TRUE) {
     all.true.labels <- c()
     all.predict.labels <- c()
     all.predict.scores <- c()
     for (f in 1:length(results.list)) {
-      all.true.labels <- c(all.true.labels, as.character(results.list[[f]][[as.character(K)]][['trueLabels']]))
-      all.predict.labels <- c(all.predict.labels, as.character(results.list[[f]][[as.character(K)]][['predictionLabels']]))
-      all.predict.scores <- rbind(all.predict.scores, results.list[[f]][[as.character(K)]][['predictionScores']])
+      all.true.labels <- c(all.true.labels, as.character(results.list[[f]][['trueLabels']]))
+      all.predict.labels <- c(all.predict.labels, as.character(results.list[[f]][['predictionLabels']]))
+      all.predict.scores <- rbind(all.predict.scores, results.list[[f]][['predictionScores']])
     }
     
     all.cm <- confusionMatrix(data=as.factor(all.predict.labels), reference=as.factor(all.true.labels))
-    overall[[as.character(K)]][['ACC']] <- as.numeric(all.cm$overall['Accuracy'])
-    overall[[as.character(K)]][['Sensitivity']] <- as.numeric(all.cm$byClass[, 1]) -> all.sens
-    overall[[as.character(K)]][['Specificity']] <- as.numeric(all.cm$byClass[, 2]) -> all.spec
+    overall[['ACC']] <- as.numeric(all.cm$overall['Accuracy'])
+    overall[['Sensitivity']] <- as.numeric(all.cm$byClass[, 1]) -> all.sens
+    overall[['Specificity']] <- as.numeric(all.cm$byClass[, 2]) -> all.spec
     all.youden <- all.sens + all.spec - 1
     names(all.youden) <- gsub('Class: ', '', rownames(all.cm$byClass))
-    overall[[as.character(K)]][['Youden']] <- all.youden
-    overall[[as.character(K)]][['predictionScores']] <- all.predict.scores
-    overall[[as.character(K)]][['cm']] <- all.cm
-    overall[[as.character(K)]][['avg.sens']] <- sum(all.sens)/length(all.sens)
-    overall[[as.character(K)]][['avg.spec']] <- sum(all.spec)/length(all.spec)
-    overall[[as.character(K)]][['avg.yd']] <- sum(all.youden)/length(all.youden)
+    overall[['Youden']] <- all.youden
+    overall[['predictionScores']] <- all.predict.scores
+    overall[['cm']] <- all.cm
+    overall[['trueLabels']] <- all.true.labels
+    overall[['avg.sens']] <- sum(all.sens)/length(all.sens)
+    overall[['avg.spec']] <- sum(all.spec)/length(all.spec)
+    overall[['avg.yd']] <- sum(all.youden)/length(all.youden)
+  } else {
+    for (k in 1:length(Ks)) {
+      K <- Ks[k]
+      overall[[as.character(K)]] <- list()
+      all.true.labels <- c()
+      all.predict.labels <- c()
+      all.predict.scores <- c()
+      for (f in 1:length(results.list)) {
+        all.true.labels <- c(all.true.labels, as.character(results.list[[f]][[as.character(K)]][['trueLabels']]))
+        all.predict.labels <- c(all.predict.labels, as.character(results.list[[f]][[as.character(K)]][['predictionLabels']]))
+        all.predict.scores <- rbind(all.predict.scores, results.list[[f]][[as.character(K)]][['predictionScores']])
+      }
+      
+      all.cm <- confusionMatrix(data=as.factor(all.predict.labels), reference=as.factor(all.true.labels))
+      overall[[as.character(K)]][['ACC']] <- as.numeric(all.cm$overall['Accuracy'])
+      overall[[as.character(K)]][['Sensitivity']] <- as.numeric(all.cm$byClass[, 1]) -> all.sens
+      overall[[as.character(K)]][['Specificity']] <- as.numeric(all.cm$byClass[, 2]) -> all.spec
+      all.youden <- all.sens + all.spec - 1
+      names(all.youden) <- gsub('Class: ', '', rownames(all.cm$byClass))
+      overall[[as.character(K)]][['Youden']] <- all.youden
+      overall[[as.character(K)]][['predictionScores']] <- all.predict.scores
+      overall[[as.character(K)]][['cm']] <- all.cm
+      overall[[as.character(K)]][['avg.sens']] <- sum(all.sens)/length(all.sens)
+      overall[[as.character(K)]][['avg.spec']] <- sum(all.spec)/length(all.spec)
+      overall[[as.character(K)]][['avg.yd']] <- sum(all.youden)/length(all.youden)
+    }
   }
   overall
 }
@@ -508,10 +533,10 @@ trainModel <- function(dataframe, labels, Ks, grp.names, kpairs, no.model) {
         for (r in (g+1):length(grp.names)) {
           group1 <- grp.names[g]
           group2 <- grp.names[r]
-          ktsp <- kpairs[[sprintf('%s_%s', group1, group2)]][[as.character(K)]]
+          ktsp <- kpairs[[as.character(K)]][[sprintf('%s_%s', group1, group2)]]
           bi.train <- dataframe[which(labels == group1 | labels == group2),]
           bi.labels <- factor(labels[labels == group1 | labels == group2])
-          bi.train <- bi.train[, ktsp$geneX] - bi.train[, ktsp$geneY]
+          bi.train <- bi.train[ ,ktsp$geneX] - bi.train[ ,ktsp$geneY]
           bi.train <- as.data.frame(ifelse(bi.train > 0, "1", "0"))
           colnames(bi.train) <- sprintf("%s.%s", ktsp$geneX, ktsp$geneY)
           bi.train <- cbind.data.frame(bi.train, type=bi.labels)
@@ -559,7 +584,7 @@ testing <- function(testdata, testLabels, Ks, grp.names, kpairs, full.model, no.
           ktsp <- kpairs[[as.character(k)]][[sprintf('%s_%s', group1, group2)]]
           
           # Subset data & binarize
-          bi.test <- dataframe[, ktsp$geneX] - dataframe[, ktsp$geneY]
+          bi.test <- testdata[, ktsp$geneX] - testdata[, ktsp$geneY]
           bi.test <- as.data.frame(ifelse(bi.test > 0, "1", "0"))
           colnames(bi.test) <- sprintf("%s.%s", ktsp$geneX, ktsp$geneY)
           bi.test <- cbind.data.frame(bi.test, type=labels)
@@ -569,7 +594,7 @@ testing <- function(testdata, testLabels, Ks, grp.names, kpairs, full.model, no.
           
           model <- full.model[[as.character(k)]][[sprintf('%s_%s', group1, group2)]]
           predictionPrs.test <- predict(model, newdata=bi.test, type='prob')
-          predictionPrs.test <- predictionPrs.test[, c(group1, group2)]
+          predictionPrs.test <- predictionPrs.test[ ,c(group1, group2)]
           colnames(predictionPrs.test) <- paste0(colnames(predictionPrs.test), paste0(".", sprintf('%s_%s', group1, group2)))
           
           # Combine & merge probability tables
@@ -611,16 +636,15 @@ testing <- function(testdata, testLabels, Ks, grp.names, kpairs, full.model, no.
 
 
 
-
 ### Set parameters and simulate training & testing data
 ```{R parameters}
-g.null <- 80
-g.sig <- 20
-n.train <- c(50, 50, 50) # class 0,1,2
-n.test <- c(50, 50, 50)
+g.null <- 900
+g.sig <- 100
+n.train <- c(200, 200, 200) # class 0,1,2
+n.test <- c(200, 200, 200)
 SDnullMu <- 5
 DFnullSD <- 4
-lb.shift <- 0.9
+lb.shift <- 0.7
 ub.shift <- 1.2
 testMu.shift <- 0
 testSD.shift <- 1.5
@@ -678,7 +702,86 @@ for (a in alpha) {
 
 
 
-### Loop over model 1 to 3
+### Baseline model
+Input raw expression values into random forest model.
+```{R baseline}
+# 5-fold cross validation
+rf.cv <- function(data.train, labels.train) {
+  results.list <- list()
+  data.train <- cbind.data.frame(data.train, type=labels.train)
+  folds <- createFolds(labels.train, k=5)
+  
+  for (i in 1:5) {
+    results.list[[as.character(i)]] <- list()
+    
+    # 1/5 for validation, 4/5 for training
+    cv.train <- data.train[-folds[[i]], ]
+    cv.train.labels <- labels.train[-folds[[i]]]
+    cv.valid <- data.train[folds[[i]], ]
+    cv.valid.labels <- labels.train[folds[[i]]]
+    
+    # Build the model
+    rf.model <- randomForest(type~., data=cv.train, ntree=500, replace=F)
+    predictionLabels <- predict(rf.model, newdata=cv.valid, type='response')
+    predictionScores <- predict(rf.model, newdata=cv.valid, type='prob')
+    
+    # Save performances
+    cm <- confusionMatrix(data=as.factor(predictionLabels), reference=as.factor(cv.valid.labels))
+    sensitivity <- as.numeric(cm$byClass[, 1])
+    specificity <- as.numeric(cm$byClass[, 2])
+    youden <- sensitivity + specificity - 1
+    names(youden) <- gsub('Class: ', '', rownames(cm$byClass))
+    results.list[[i]][['trueLabels']] <- cv.valid.labels
+    results.list[[i]][['predictionLabels']] <- predictionLabels
+    results.list[[i]][['predictionScores']] <- predictionScores
+    results.list[[i]][['ConfusionMatrix']] <- cm
+    results.list[[i]][['ACC']] <- as.numeric(cm$overall['Accuracy'])
+    results.list[[i]][['Youden']] <- youden
+    results.list[[i]][['RFmodels']] <- rf.model
+    print(paste0("Fold ", i, " ACC:", round(results.list[[i]][['ACC']], 5)))
+  }
+  results.list
+}
+
+
+bl.model <- function(data.train, labels.train) {
+  data.train <- cbind.data.frame(data.train, type=labels.train)
+  full.model <- randomForest(type~., data = data.train, ntree = 500, replace = F)
+  full.model
+}
+
+
+raw.testing <- function(data.test, labels.test, model) {
+  test.results <- list()
+  data.test <- cbind.data.frame(data.test, type=labels.test)
+  
+  predictionLabels.test <- predict(model, newdata = data.test, type = 'response')
+  predictionLabels.test <- factor(predictionLabels.test, levels = levels(labels.test))
+  predictionScores.test <- predict(model, newdata = data.test, type = 'prob')
+  
+  cm <- confusionMatrix(data=predictionLabels.test, reference=labels.test)
+  sensitivity <- as.numeric(cm$byClass[, 1])
+  specificity <- as.numeric(cm$byClass[, 2])
+  youden <- sensitivity + specificity - 1
+  names(youden) <- gsub('Class: ', '', rownames(cm$byClass))
+  test.acc <- as.numeric(cm$overall['Accuracy'])
+  
+  test.results[['ACC']] <- test.acc
+  test.results[['avg.sens']] <- sum(sensitivity)/length(sensitivity)
+  test.results[['avg.spec']] <- sum(specificity)/length(specificity)
+  test.results[['predictionLabels']] <- predictionLabels.test
+  test.results[['predictionScores']] <- predictionScores.test
+  test.results[['cm']] <- cm
+  test.results[['Youden']] <- youden
+  test.results[['avg.yd']] <- sum(youden)/length(youden)
+  print(paste0("ACC:", round(test.results$ACC, 5)))
+  test.results
+}
+```
+
+
+
+### Loop over model baseline & 1 to 3
 ```{R}
 all.results <- list()
 for (a in alpha) {
@@ -694,13 +797,23 @@ for (a in alpha) {
   sig.dix <- out$sig.idx
   
   # Calculate ktsp scores in different ways
-  grps <- unique(lb.train)
+  grps <- as.character(unique(lb.train))
   one.tsp <- getTSP(grps, expr.train, lb.train, 'one') 
   pw.tsp <- getTSP(grps, expr.train, lb.train, 'pairwise')
   
-  kpairs <- list()
+  
+  # Train baseline model
+  print(paste0('  Running baseline model...'))
+  all.results[[as.character(a)]][['baseline']] <- list()
+  all.results[[as.character(a)]][['baseline']][['cv']] <- rf.cv(as.data.frame(t(expr.train)), lb.train)
+  all.results[[as.character(a)]][['baseline']][['overall.cv']] <- getOverall(all.results[[as.character(a)]][['baseline']][['cv']], Ks, baseline=TRUE)
+  all.results[[as.character(a)]][['baseline']][['full.model']] <- bl.model(as.data.frame(t(expr.train)), lb.train)
+  all.results[[as.character(a)]][['baseline']][['test']] <- raw.testing(as.data.frame(t(expr.test)), lb.test, 
+                                                    all.results[[as.character(a)]][['baseline']][['full.model']])
+  
   # Loop over model 1 to 3
-  for (i in 1:2) {
+  kpairs <- list()
+  for (i in 1:3) {
     print(paste0('  Running model ', i, '...'))
     chri <- as.character(i)
     kpairs[[chri]] <- list()
@@ -717,12 +830,15 @@ for (a in alpha) {
     all.results[[as.character(a)]][[chri]][['full.model']] <- trainModel(as.data.frame(t(expr.train)), lb.train, Ks, grps, kpairs[[i]], i)
     
     # Test on independent set
-    all.results[[as.character(a)]][[chri]][['test']] <- testing(as.data.frame(t(expr.test)), lb.test, 
-                                          Ks, grps, kpairs[[i]], all.results[[as.character(a)]][[chri]][['full.model']], i)
+    all.results[[as.character(a)]][[chri]][['test']] <- testing(as.data.frame(t(expr.test)), lb.test, Ks, grps, 
+                                          kpairs[[i]], all.results[[as.character(a)]][[chri]][['full.model']], i)
   }
   all.results[[as.character(a)]][['kpairs']] <- kpairs
 }
+
+save(all.results, file = '~/ktsp/multi.results/simulation/all.results.Rdata')
 ```
+
 
 
 ### Draw the performances
@@ -738,8 +854,9 @@ plot.perf <- function(modelName, a.results, Ks, name, listname, whichone) {
 
     for (k in 1:length(Ks)) {
       K <- Ks[k]
-      df[nrow(df)+1, ][[listname]] <- overall[[as.character(K)]][[listname]]
-      df[nrow(df), ]$model <- paste0('model ', n)
+      ifelse(n == "baseline", df[nrow(df)+1, ][[listname]] <- overall[[listname]], 
+                              df[nrow(df)+1, ][[listname]] <- overall[[as.character(K)]][[listname]])
+      df[nrow(df), ]$model <- paste0(n)
       df[nrow(df), ]$K <- K
     }
   }
@@ -753,7 +870,7 @@ plot.perf <- function(modelName, a.results, Ks, name, listname, whichone) {
     #scale_y_continuous(breaks = seq(yrange[1], yrange[2], by=0.1), limits = yrange)
 }
 
-models <- c("1", "2")
+models <- c("baseline", "1", "2", "3")
 paras <- c('ACC', 'avg.sens', 'avg.spec', 'avg.yd')
 names <- c('Accuracy', 'Avg. Sensitivity', 'Avg. Specificity', 'Avg. Youden')
 
@@ -771,10 +888,6 @@ for (a in alpha) {
   fig <- ggarrange(t1, t2, t3, t4, nrow=2, ncol=2, common.legend=T, legend='right')
   print(annotate_figure(fig, top=paste0('Testing', ' | alpha = ', a)))
 }
-
-
-
-
 ```
 
 
@@ -798,3 +911,4 @@ for(i in c(10, 9)) {
   lines(x=1:ncol(expr.train), y=expr.train[i,], col=getColors(1))
 }
 ```
+
