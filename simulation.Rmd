@@ -9,712 +9,44 @@ Use simulation data to test our proposed model 1~3
 
 ```{R set up}
 suppressPackageStartupMessages({
-  library(truncnorm)
-  library(switchBox)
-  library(caret)
   library(dplyr)
   library(ggplot2)
-  library(randomForest)
-  library(nloptr)
   library(ggpubr)
-  library(RColorBrewer)
 })
-```
 
-
-### Simulate data with underlying truth
-Modified from Silvia's code: `simu_multi_silvia_190423.R`
-```{R simu}
-simu.multi <- function(g.null, g.sig, alpha, n.train, n.test, SDnullMu, DFnullSD, lb.shift, ub.shift, testMu.shift, testSDshift, seed=15213) {
-  ### input
-  # g.null - number of null (non-various) genes
-  # g.sig - number of significant (various) genes
-  # alpha - rate of only-one-class-DE-gene (1, 0, 0); while 1-alpha is for the rate of all-diff-DE-gene (-1, 0, 1)
-  # n.train - a vector for number of training samples for each class (can be multi-class)
-  # n.test - a vector for number of testing samples (same length with n.train)
-  # SDnullMu - SD for null gene mu value
-  # DFnullSD - degree of free for null gene SD
-  # lb.shift - significant gene shift lower bound
-  # ub.shift - significant gene shift upper bound
-  # testMu.shift - test shift mean value
-  # testSD.shift - test shift SD value
-  # seed - seed for random number
-  
-  ### output
-  # Xtrain - training expression table, gene by sample
-  # Ytrain - training outcome label
-  # Xtest - testing expression table, gene by sample
-  # Ytest - testing outcome label
-  # sig.idx - significant gene index, TRUE for sig and FALSE for non-sig
-  # geneMU - gene mu value, a gene-by-group matrix
-  # geneSD - gene SD value, a vector with length of gene
-  
-  
-  set.seed(seed)
-  
-  g.sig <- as.integer(g.sig)
-  if (g.sig <= 0) stop("g.sig - number of significant genes - has to be a positive integer")
-  
-  g.null <- as.integer(g.null)
-  if (g.null <= 0) stop("g.null - number of null genes - has to be a positive integer")
-  
-  if (alpha < 0 | alpha > 1) stop("Ratio alpha has to be [0, 1]")
-  
-  n.train <- as.integer(n.train)
-  if (length(n.train) != 3) stop("Training data have to have 3 outcomes, that is length(Ntrain) = 3")
-  
-  n.test <- as.integer(n.test)
-  if (length(n.train) != length(n.test)) stop("Length of n.train has to be equal to length of n.test.")
-
-  
-  # prepare gene number and index
-  g.all <- g.sig + g.null
-  g.total <- sum(g.all) #??
-  g.start.idx <- c(1, g.sig+1)
-  g.end.idx <- c(g.sig, g.all)
-  
-  
-  # prepare sample number and index
-  n.class <- length(n.train)  # number of outcome categories
-  n.all <- n.train + n.test # total number
-  n.total <- sum(n.all) 
-  n.start.idx <- rep(1, times=length(n.all)) # start index
-  n.end.idx <- rep(n.all[1], times=length(n.all)) # end index
-  for (i in 2:length(n.all)) {
-    n.start.idx[i] <- n.start.idx[i-1] + n.all[i-1] ## ??
-    n.end.idx[i] <- n.end.idx[i-1] + n.all[i] ## ??
-  }
-  
-  
-  ## 1. Simulate null/baseline genes (exprssion not vary among all classes)
-  E <- matrix(0, nrow=g.total, ncol=n.total)  # expression table
-  gene_mu <- rnorm(g.total, mean=0, sd=SDnullMu)  # gene mu follows normal distribution
-  gene_sd <- sqrt(rchisq(n=g.total, df=DFnullSD))   # gene variance follows chisq distribution
-  for (i in 1:g.total) {
-    E[i, ] <- rnorm(n.total, mean=gene_mu[i], sd=gene_sd[i]) 
-  }
-  
-  
-  ## 2. Simulate significant genes (vary in 1 - one vs all other or 2 - pairwise ways) 
-  # 2.1 only-one-DE gene, alpha type, type A
-  g.alpha <- as.integer(g.sig * alpha) # number of one-other-sig-genes
-  if (g.alpha > 0) {
-    shiftC1 <- matrix(rtruncnorm(g.alpha*n.class, a=lb.shift, b=ub.shift, mean=0, sd=SDnullMu), nrow=g.alpha, ncol=n.class)
-
-    directionCandidate1 <- rbind(c(1,0,0), c(0,1,0), c(0,0,1), c(-1,0,0), c(0,-1,0), c(0,0,-1))
-    direction1 <- matrix(0, nrow=g.alpha, ncol=n.class)  # showing the gene direction for each outcome category
-    for (i in 1:g.alpha) {
-      direction1[i, ] <- directionCandidate1[sample(nrow(directionCandidate1), 1), ] # randomly choose from candidate
-      
-      for (j in 1:n.class) {
-        E[i, n.start.idx[j]:n.end.idx[j]] <- E[i, n.start.idx[j]:n.end.idx[j]] + direction1[i, j] * shiftC1[i, j]
-      }
-    }
-  } else {
-    direction1 <- c()
-    shiftC1 <- c()
-  }
-  
-  # 2.2 all-DE gene, 1-alpha type, type B
-  g.alphaN <- g.sig - g.alpha # number of pairwise-sig-genes
-  if (g.alphaN > 0) {
-    shiftC2 <- matrix(rtruncnorm(g.alphaN*n.class, a=lb.shift, b=ub.shift, mean=0, sd=SDnullMu), nrow=g.alphaN, ncol=n.class)
-    directionCandidate2 <- rbind(c(1,0,-1), c(1,-1,0), c(0,-1,1), c(0,1,-1), c(-1,1,0), c(-1,0,1))
-    direction2 <- matrix(0, nrow=g.alphaN, ncol=n.class)  # showing the gene direction for each outcome category
-    for (i in 1:g.alphaN) {
-      direction2[i, ] <- directionCandidate2[sample(nrow(directionCandidate2), 1), ] # randomly choose from candidate
-      
-      for (j in 1:n.class) {
-        E[g.alpha+i, n.start.idx[j]:n.end.idx[j]] <- E[i+g.alpha, n.start.idx[j]:n.end.idx[j]] + direction2[i,j] * shiftC2[i,j]
-      }
-    }
-  } else {
-    direction2 <- c()
-    shiftC2 <- c()
-  }
-  
-  
-  ## summarize the data
-  # sig gene index
-  sig.idx <- rep('N', times=g.total)
-  sig.idx[1:g.sig] <- rep(c('A', 'B'), times=c(g.alpha, g.alphaN))
-  
-  # gene effect
-  direction <- rbind(direction1, direction2)
-  shiftC <- rbind(shiftC1, shiftC2)
-  geneMU <- matrix(gene_mu, nrow=g.total, ncol=n.class)
-  if (g.sig > 0) {
-    geneMU[1:g.sig, ] <- geneMU[1:g.sig, ] + direction * shiftC
-  }  
-  
-  
-  ## split training and testing expression
-  train.idx <- c()
-  for (j in 1:n.class) {
-    train.idx <- c(train.idx, (n.start.idx[j]:(n.start.idx[j ]+ n.train[j] - 1)))
-  }
-  
-  ifelse(length(train.idx) > 0, Xtrain <- E[ ,train.idx], Xtrain <- c())
-  
-  # add shift to test value
-  if (length(train.idx) < n.total) {
-    Xtest <- E[, -train.idx]
-    for (i in 1:nrow(Xtest)) {
-      Xtest[i, ] <- Xtest[i, ] + rnorm(ncol(Xtest), mean=testMu.shift, sd=testSD.shift)
-    }
-  } else {
-    Xtest <- c()
-  }
-  
-  
-  Xtrain <- as.data.frame(Xtrain)
-  Xtest <- as.data.frame(Xtest)
-  ###### the rowname set alpha and beta
-  rownames(Xtrain) <- sapply(seq_along(rownames(Xtrain)), function(x) paste0(sig.idx[x], x)) -> rownames(Xtest)
-  rownames(geneMU) <- rownames(Xtrain)
-  colnames(Xtrain) <- c(1:ncol(Xtrain))
-  colnames(Xtest) <- c(1:ncol(Xtest))
-  
-  # train and test y label
-  Ytrain <- rep(0:(n.class-1), times=n.train)
-  Ytest <- rep(0:(n.class-1), times=n.test)
-  
-  list(Xtrain=Xtrain, Ytrain=factor(Ytrain), Xtest=Xtest, Ytest=factor(Ytest),
-       sig.idx=sig.idx, geneMU=geneMU, geneSD=gene_sd)
-}
-```
-
-
-### Calculate tsp scores for each class
-```{R}
-getTSP <- function(grps, expr, labels, way) {
-  tsp.list <- list()
-  if (way == 'one') { # one v.s. all other
-    for (grp in grps) {
-      grp.vec <- rep(0, length(labels))
-      grp.vec <- factor(replace(grp.vec, which(labels == grp), 1)) 
-      tmp <- SWAP.CalculateScores(as.matrix(expr), grp.vec, FilterFunc = NULL)
-      tmp <- data.frame(score = sort(tmp$score, decreasing = T))
-      tmp$geneX <- gsub('^(.*?),.*', '\\1', rownames(tmp))
-      tmp$geneY <- gsub('^(.*?),', '', rownames(tmp))
-      rownames(tmp) <- NULL
-      tsp.list[[as.character(grp)]] <- tmp
-    }
-  } else if (way == 'pairwise') { # pairwise
-    for (i in 1:(length(grps)-1)) {
-      for (j in (i+1):length(grps)) {
-        exp1 <- expr[ ,labels == as.character(grps[i])]
-        exp2 <- expr[ ,labels == as.character(grps[j])]
-        grp.data <- cbind.data.frame(exp1, exp2)
-        grp.vec <- factor(labels[labels == as.character(grps[i]) | labels == as.character(grps[j])])
-        tmp <- SWAP.CalculateScores(as.matrix(grp.data), grp.vec, FilterFunc = NULL)
-        tmp <- data.frame(score = sort(tmp$score, decreasing = T))
-        tmp$geneX <- gsub('^(.*?),.*', '\\1', rownames(tmp))
-        tmp$geneY <- gsub('^(.*?),', '', rownames(tmp))
-        rownames(tmp) <- NULL
-        tsp.list[[sprintf('%s_%s', grps[i], grps[j])]] <- tmp
-      }
-    }
-  } else {print('The options of way are just "one" or "pairwise"!')}
-  tsp.list
-}
-```
-
-
-### Extract k pairs from each class and compose a dataframe
-```{R mergek}
-# Merge k gene pairs from each group
-mergePairs <- function(Ks, tsp.list, no.model) {
-  # Function to eliminate duplicated rows
-  delete.dup <- function(table) {
-    dup.table <- table[which(duplicated(table[, c(1, 2)])), ]
-    if (nrow(dup.table) != 0) {
-      sum.dup <- unique(dup.table %>% group_by_(.dots=c("geneX", "geneY")) %>% 
-                          mutate(Dclass=paste(class, collapse = ",")) %>% select(-class))
-      table <- table[which(!duplicated(table[, c(1, 2)])), ]
-      table$class <- as.vector(table$class)
-      for (n in 1:nrow(sum.dup)) {
-        row <- sum.dup[n, ]
-        rep.names <- strsplit(row$Dclass, ",")[[1]]
-        ori.name <- as.character(table[(table$geneX==row$geneX & table$geneY==row$geneY),]$class)
-        if (!ori.name %in% rep.names) {
-          ori.name <- paste(c(ori.name, rep.names), collapse = ",")
-        } else {
-          ori.name <- paste(rep.names, collapse = ",")
-        }
-        table[(table$geneX==row$geneX & table$geneY==row$geneY),]$class <- ori.name
-      }
-    }
-    table
-  }
-  
-  kpairs <- list()
-  # Extract k pairs
-  for (K in Ks) {
-    ifelse (no.model == 3, kpairs[[as.character(K)]] <- list(), kpairs[[as.character(K)]] <- data.frame())
-    for (s in 1:length(tsp.list)) {
-      name <- names(tsp.list)[s]
-      scores <- tsp.list[[s]]
-      if (no.model == 3) { # For model 3
-        kpairs[[as.character(K)]][[name]] <- scores[1:K, ] %>% mutate(class = rep(name, K)) %>% select(-score)
-      } else { # For model 1&2 merging
-        table <- scores[1:K, ] %>% mutate(class = rep(name, K)) %>% select(-score)
-        kpairs[[as.character(K)]] <- rbind.data.frame(kpairs[[as.character(K)]], table)
-      }
-    }
-  }
-
-  # Delete repeat rows
-  if (no.model != 3) {
-    for (i in 1:length(kpairs)) {
-      kpairs[[i]] <- delete.dup(kpairs[[i]])
-    }
-  }
-  kpairs
-}
-```
-
-
-
-### 5-fold cross-validation
-```{R}
-# CV for model 1 & model 2
-tsp.rf.cv <- function(nfold, Ks, labels, dataframe, grp.names, kpairs, no.model, baseline=FALSE) {
-  # Create folds
-  folds <- createFolds(labels, k=nfold)
-  results.list <- list()
-  
-  # Outer loop for cross-validation
-  # Intermediate loop for different Ks
-  # Inner loop for different classes
-  for (i in 1:5) {
-    results.list[[i]] <- list()
-    # 1/5 of the dataset as validation, remaining data for training
-    cv.train <- dataframe[-folds[[i]], ]
-    cv.train.labels <- labels[-folds[[i]]]
-    cv.validate <- dataframe[folds[[i]], ]
-    cv.validate.labels <- labels[folds[[i]]]
-    
-    if (baseline == TRUE) { 
-      # Baseline model
-      cv.train <- cbind.data.frame(cv.train, type=cv.train.labels)
-      cv.validate <- cbind.data.frame(cv.validate, type=cv.validate.labels)
-      
-      # Build the model
-      rf.model <- randomForest(type~., data=cv.train, ntree=500, replace=F)
-      predictionLabels <- predict(rf.model, newdata=cv.validate, type='response')
-      predictionScores <- predict(rf.model, newdata=cv.validate, type='prob')
-      
-      # Save performances
-      cm <- confusionMatrix(data=as.factor(predictionLabels), reference=as.factor(cv.validate.labels))
-      sensitivity <- as.numeric(cm$byClass[, 1])
-      specificity <- as.numeric(cm$byClass[, 2])
-      youden <- sensitivity + specificity - 1
-      names(youden) <- gsub('Class: ', '', rownames(cm$byClass))
-      results.list[[i]][['trueLabels']] <- cv.validate.labels
-      results.list[[i]][['predictionLabels']] <- predictionLabels
-      results.list[[i]][['predictionScores']] <- predictionScores
-      results.list[[i]][['ConfusionMatrix']] <- cm
-      results.list[[i]][['ACC']] <- as.numeric(cm$overall['Accuracy'])
-      results.list[[i]][['Youden']] <- youden
-      results.list[[i]][['RFmodels']] <- rf.model
-      print(paste0("Fold ", i, " ACC:", round(results.list[[i]][['ACC']], 5)))
-    } else {
-      for (K in Ks) {
-        results.list[[i]][[as.character(K)]] <- list()
-        all.tsp <- kpairs[[as.character(K)]]
-        #results.list[[i]][[as.character(K)]][['kpairs']] <- all.tsp
-        
-        # For model 1 & 2
-        if (no.model != 3) { 
-          # Create binary matrices for gene ranks
-          bi.cv.train <- cv.train[, all.tsp$geneX] - cv.train[, all.tsp$geneY]
-          bi.cv.train <- as.data.frame(ifelse(bi.cv.train > 0, "1", "0"))
-          colnames(bi.cv.train) <- sprintf("%s.%s", all.tsp$geneX, all.tsp$geneY)
-          bi.cv.train <- cbind.data.frame(bi.cv.train, type=cv.train.labels)
-          
-          bi.cv.validate <- cv.validate[, all.tsp$geneX] - cv.validate[, all.tsp$geneY]
-          bi.cv.validate <- as.data.frame(ifelse(bi.cv.validate > 0, "1", "0"))
-          colnames(bi.cv.validate) <- sprintf("%s.%s", all.tsp$geneX, all.tsp$geneY)
-          bi.cv.validate <- cbind.data.frame(bi.cv.validate, type=cv.validate.labels)
-          for (p in names(bi.cv.validate)) { # Ensure the levels of predictors are same in train & validate
-            if (p != "type") levels(bi.cv.validate[[p]]) <- c("0", "1") -> levels(bi.cv.train[[p]])
-          }
-          
-          # Build random forest
-          rf.model <- randomForest(type~., data = bi.cv.train, ntree = 500, replace = F) 
-          results.list[[i]][[as.character(K)]][['RFmodels']] <- rf.model
-          predictionLabels <- predict(rf.model, newdata=bi.cv.validate, type='response')
-          predictionPrs <- predict(rf.model, newdata=bi.cv.validate, type='prob')
-        } else { # For model 3
-          # Get RF models from each group pair
-          print('  Building RF models from each group pair')
-          results.list[[i]][[as.character(K)]][['RFmodels']] <- list()
-          prs.table <- data.frame()
-          for (g in 1:(length(grp.names)-1)) {
-            for (r in (g+1):length(grp.names)) {
-              group1 <- grp.names[g]
-              group2 <- grp.names[r]
-              ktsp <- kpairs[[as.character(K)]][[sprintf('%s_%s', group1, group2)]]
-              
-              # Create binary matrices for gene ranks
-              bi.cv.train <- cv.train[which(cv.train.labels == group1 | cv.train.labels == group2),]
-              bi.cv.train.labels <- factor(cv.train.labels[cv.train.labels == group1 | cv.train.labels == group2])
-              bi.cv.train <- bi.cv.train[, ktsp$geneX] - bi.cv.train[, ktsp$geneY]
-              bi.cv.train <- as.data.frame(ifelse(bi.cv.train > 0, "1", "0"))
-              colnames(bi.cv.train) <- sprintf("%s.%s", ktsp$geneX, ktsp$geneY)
-              bi.cv.train <- cbind.data.frame(bi.cv.train, type=bi.cv.train.labels)
-              
-              bi.cv.validate <- cv.validate[ ,ktsp$geneX] - cv.validate[ ,ktsp$geneY]
-              bi.cv.validate <- as.data.frame(ifelse(bi.cv.validate > 0, "1", "0"))
-              colnames(bi.cv.validate) <- sprintf("%s.%s", ktsp$geneX, ktsp$geneY)
-              bi.cv.validate <- cbind.data.frame(bi.cv.validate, type=cv.validate.labels)
-              for (p in names(bi.cv.validate)) {
-                if (p != "type") {
-                  levels(bi.cv.validate[[p]]) <- c("0", "1") -> levels(bi.cv.train[[p]])
-                }
-              } 
-              
-              # Build random forest for pairwise groups
-              rf.model <- randomForest(type~., data = bi.cv.train, ntree = 500, replace = F) # tuned later
-              results.list[[i]][[as.character(K)]][['RFmodels']][[sprintf('%s_%s', group1, group2)]] <- rf.model
-              predictionPrs <- as.data.frame(predict(rf.model, newdata=bi.cv.validate, type='prob'))
-              predictionPrs <- predictionPrs[ ,c(group1, group2)]
-              colnames(predictionPrs) <- paste0(colnames(predictionPrs), paste0(".", sprintf('%s_%s', group1, group2)))
-              
-              # Combine & merge probability tables
-              if (nrow(prs.table) == 0) {
-                prs.table <- rbind.data.frame(prs.table, predictionPrs)
-              } else {
-                prs.table <- cbind.data.frame(prs.table, predictionPrs)
-              }
-            }
-          }
-          print('  Calculating final probs using our obj func.')
-          predictionPrs <- opti.RFs(prs.table, grp.names)
-          predictionPrs$predict.grp <- colnames(predictionPrs)[apply(predictionPrs, 1, which.max)] -> predictionLabels
-        }
-      
-        # Store performances
-        cm <- confusionMatrix(data=as.factor(predictionLabels), reference=as.factor(cv.validate.labels))
-        sensitivity <- as.numeric(cm$byClass[, 1])
-        specificity <- as.numeric(cm$byClass[, 2])
-        youden <- sensitivity + specificity - 1
-        names(youden) <- gsub('Class: ', '', rownames(cm$byClass))
-        results.list[[i]][[as.character(K)]][['trueLabels']] <- cv.validate.labels
-        results.list[[i]][[as.character(K)]][['predictionLabels']] <- predictionLabels
-        results.list[[i]][[as.character(K)]][['predictionScores']] <- predictionPrs
-        results.list[[i]][[as.character(K)]][['ConfusionMatrix']] <- cm
-        results.list[[i]][[as.character(K)]][['Sens']] <- sensitivity
-        results.list[[i]][[as.character(K)]][['Specs']] <- specificity
-        results.list[[i]][[as.character(K)]][['ACC']] <- as.numeric(cm$overall['Accuracy'])
-        results.list[[i]][[as.character(K)]][['Youden']] <- youden
-        if (no.model != 3) results.list[[i]][[as.character(K)]][['RFmodels']] <- rf.model
-        #print(paste0("Fold ", i, " & K=", K,  " ACC:", round(results.list[[i]][[as.character(K)]][['ACC']], 5)))
-      }
-    }
-  }
-  results.list
-}
-
-
-# Optimize final probabilities using objective function
-opti.RFs <- function(prs.table, grp.names) {
-  ngrp <- length(grp.names)
-  lb <- rep(0, ngrp) # lower bound
-  ub <- rep(1, ngrp) # upper bound
-  x0 <- setNames(rep(1/ngrp, ngrp), grp.names) # vector with starting values for the optimization
-  
-  # Objective function
-  obj_f <- function(x, pw.p.mat) {
-    # x0 Normal   LumA   LumB   Her2  Basal 
-    #      0.2    0.2    0.2    0.2    0.2 
-    fml <- 0
-    for (g in 1:(length(x)-1)) {
-      for (r in (g+1):length(x)) {
-        fml <- fml + (pw.p.mat[g, r] - x[g]/(x[g] + x[r]))^2 + (pw.p.mat[r, g] - x[r]/(x[g] + x[r]))^2
-      }
-    }
-    sum(fml)
-  }
-  
-  # Rewrite the equality as 1 - (P1 + P2 + P3 + P4 + P5) = 0
-  eq_c <- function(x, pw.p.mat) 1 - sum(x) 
-  
-  # Rewrite the inequality as P1*P2*P3*P4*P5 - 1 <= 0
-  ineq_c <- function(x, pw.p.mat) prod(x) - 1
-  
-  # Function to transform a row in prs.table to a matrix
-  rowToMat <- function(row, grp.names) {
-    row.mat <- setNames(data.frame(matrix(ncol=ngrp, nrow=ngrp), stringsAsFactors=F), grp.names)
-    rownames(row.mat) <- colnames(row.mat)
-    for (g in 1:(ngrp-1)) {
-      grp1 <- grp.names[g]
-      for (r in (g+1):ngrp) {
-        grp2 <- grp.names[r]
-        grp <- sprintf('%s_%s', grp1, grp2)
-        row.mat[g, r] <- row[, sprintf('%s.%s', grp1, grp)]
-        row.mat[r, g] <- row[, sprintf('%s.%s', grp2, grp)]
-      }
-    }
-    row.mat
-  }
-  
-  
-  # Summarize final probabilities
-  final.prs <- setNames(data.frame(matrix(ncol = ngrp, nrow = 0), stringsAsFactors=F), grp.names)
-  for (n in 1:nrow(prs.table)) {
-    pw.p.mat <- rowToMat(prs.table[n, ], grp.names)
-    opt <- nloptr(x0=x0, eval_f=obj_f, lb=lb, ub=ub, eval_g_ineq=ineq_c, eval_g_eq=eq_c, 
-                  opts=list(algorithm="NLOPT_GN_ISRES", "maxeval" = 150000), pw.p.mat=pw.p.mat)
-    final.prs[nrow(final.prs)+1, ] <- opt$solution
-  }
-  rownames(final.prs) <- rownames(prs.table)
-  final.prs
-}
-
-
-# Get overall values of performances from CV results
-getOverall <- function(results.list, Ks, baseline=FALSE) {
-  overall <- list()
-  
-  if (baseline == TRUE) {
-    all.true.labels <- c()
-    all.predict.labels <- c()
-    all.predict.scores <- c()
-    for (f in 1:length(results.list)) {
-      all.true.labels <- c(all.true.labels, as.character(results.list[[f]][['trueLabels']]))
-      all.predict.labels <- c(all.predict.labels, as.character(results.list[[f]][['predictionLabels']]))
-      all.predict.scores <- rbind(all.predict.scores, results.list[[f]][['predictionScores']])
-    }
-    
-    all.cm <- confusionMatrix(data=as.factor(all.predict.labels), reference=as.factor(all.true.labels))
-    overall[['ACC']] <- as.numeric(all.cm$overall['Accuracy'])
-    overall[['Sensitivity']] <- as.numeric(all.cm$byClass[, 1]) -> all.sens
-    overall[['Specificity']] <- as.numeric(all.cm$byClass[, 2]) -> all.spec
-    all.youden <- all.sens + all.spec - 1
-    names(all.youden) <- gsub('Class: ', '', rownames(all.cm$byClass))
-    overall[['Youden']] <- all.youden
-    overall[['predictionScores']] <- all.predict.scores
-    overall[['cm']] <- all.cm
-    overall[['trueLabels']] <- all.true.labels
-    overall[['avg.sens']] <- sum(all.sens)/length(all.sens)
-    overall[['avg.spec']] <- sum(all.spec)/length(all.spec)
-    overall[['avg.yd']] <- sum(all.youden)/length(all.youden)
-  } else {
-    for (k in 1:length(Ks)) {
-      K <- Ks[k]
-      overall[[as.character(K)]] <- list()
-      all.true.labels <- c()
-      all.predict.labels <- c()
-      all.predict.scores <- c()
-      for (f in 1:length(results.list)) {
-        all.true.labels <- c(all.true.labels, as.character(results.list[[f]][[as.character(K)]][['trueLabels']]))
-        all.predict.labels <- c(all.predict.labels, as.character(results.list[[f]][[as.character(K)]][['predictionLabels']]))
-        all.predict.scores <- rbind(all.predict.scores, results.list[[f]][[as.character(K)]][['predictionScores']])
-      }
-      
-      all.cm <- confusionMatrix(data=as.factor(all.predict.labels), reference=as.factor(all.true.labels))
-      overall[[as.character(K)]][['ACC']] <- as.numeric(all.cm$overall['Accuracy'])
-      overall[[as.character(K)]][['Sensitivity']] <- as.numeric(all.cm$byClass[, 1]) -> all.sens
-      overall[[as.character(K)]][['Specificity']] <- as.numeric(all.cm$byClass[, 2]) -> all.spec
-      all.youden <- all.sens + all.spec - 1
-      names(all.youden) <- gsub('Class: ', '', rownames(all.cm$byClass))
-      overall[[as.character(K)]][['Youden']] <- all.youden
-      overall[[as.character(K)]][['predictionScores']] <- all.predict.scores
-      overall[[as.character(K)]][['cm']] <- all.cm
-      overall[[as.character(K)]][['avg.sens']] <- sum(all.sens)/length(all.sens)
-      overall[[as.character(K)]][['avg.spec']] <- sum(all.spec)/length(all.spec)
-      overall[[as.character(K)]][['avg.yd']] <- sum(all.youden)/length(all.youden)
-    }
-  }
-  overall
-}
-```
-
-
-
-### Testing on test data
-```{R test}
-# Train a model using whole training set
-trainModel <- function(dataframe, labels, Ks, grp.names, kpairs, no.model, baseline=FALSE) {
-  if (baseline == TRUE) {
-    dataframe <- cbind.data.frame(dataframe, type=labels)
-    model <- randomForest(type~., data = dataframe, ntree = 500, replace = F)
-  } else {
-    model <- list()
-    for (K in Ks) {
-      model[[as.character(K)]] <- list()
-      
-      if (no.model != 3) { # For model 1 & 2
-        ktsp <- kpairs[[as.character(K)]]
-        bi.train <- dataframe[, ktsp$geneX] - dataframe[, ktsp$geneY]
-        bi.train <- as.data.frame(ifelse(bi.train > 0, "1", "0"))
-        colnames(bi.train) <- sprintf("%s.%s", ktsp$geneX, ktsp$geneY)
-        bi.train <- cbind.data.frame(bi.train, type=labels)
-        for (p in names(bi.train)) {
-          if (p != "type") levels(bi.train[[p]]) <- c("0", "1") 
-        }
-        model[[as.character(K)]] <- randomForest(type~., data = bi.train, ntree = 500, replace = F) 
-      } else { # For model 3
-        model[[as.character(K)]] <- list()
-        for (g in 1:(length(grp.names)-1)) {
-          for (r in (g+1):length(grp.names)) {
-            group1 <- grp.names[g]
-            group2 <- grp.names[r]
-            ktsp <- kpairs[[as.character(K)]][[sprintf('%s_%s', group1, group2)]]
-            bi.train <- dataframe[which(labels == group1 | labels == group2),]
-            bi.labels <- factor(labels[labels == group1 | labels == group2])
-            bi.train <- bi.train[ ,ktsp$geneX] - bi.train[ ,ktsp$geneY]
-            bi.train <- as.data.frame(ifelse(bi.train > 0, "1", "0"))
-            colnames(bi.train) <- sprintf("%s.%s", ktsp$geneX, ktsp$geneY)
-            bi.train <- cbind.data.frame(bi.train, type=bi.labels)
-            for (p in names(bi.train)) {
-              if (p != "type") levels(bi.train[[p]]) <- c("0", "1")
-            }
-    
-            # Build random forest for pair-wise groups
-            rf.model <- randomForest(type~., data = bi.train, ntree = 500, replace = F) # tuned later
-            model[[as.character(K)]][[sprintf('%s_%s', group1, group2)]] <- rf.model
-          }
-        }
-      }
-    }
-  }
-  model
-}
-
-
-testing <- function(testdata, testLabels, Ks, grp.names, kpairs, full.model, no.model, baseline=FALSE) {
-  test.results <- list()
-  if (baseline == TRUE) {
-    testdata <- cbind.data.frame(testdata, type=testLabels)
-    
-    predictionLabels.test <- predict(full.model, newdata = testdata, type = 'response')
-    predictionLabels.test <- factor(predictionLabels.test, levels = levels(testLabels))
-    predictionScores.test <- predict(full.model, newdata = testdata, type = 'prob')
-    
-    cm <- confusionMatrix(data=predictionLabels.test, reference=testLabels)
-    sensitivity <- as.numeric(cm$byClass[, 1])
-    specificity <- as.numeric(cm$byClass[, 2])
-    youden <- sensitivity + specificity - 1
-    names(youden) <- gsub('Class: ', '', rownames(cm$byClass))
-    test.acc <- as.numeric(cm$overall['Accuracy'])
-    
-    test.results[['ACC']] <- test.acc
-    test.results[['avg.sens']] <- sum(sensitivity)/length(sensitivity)
-    test.results[['avg.spec']] <- sum(specificity)/length(specificity)
-    test.results[['predictionLabels']] <- predictionLabels.test
-    test.results[['predictionScores']] <- predictionScores.test
-    test.results[['cm']] <- cm
-    test.results[['Youden']] <- youden
-    test.results[['avg.yd']] <- sum(youden)/length(youden)
-    print(paste0("ACC:", round(test.results$ACC, 5)))
-  } else {
-    for (k in Ks) {
-      test.results[[as.character(k)]] <- list()
-      
-      if (no.model != 3) { # For model 1 & 2
-        # Subset data & binarize
-        all.tsp <- kpairs[[as.character(k)]]
-        bi.test <- testdata[ ,all.tsp$geneX] - testdata[ ,all.tsp$geneY]
-        bi.test <- as.data.frame(ifelse(bi.test > 0, "1", "0"))
-        colnames(bi.test) <- sprintf("%s.%s", all.tsp$geneX, all.tsp$geneY)
-        bi.test <- cbind.data.frame(bi.test, type=testLabels)
-        for (p in names(bi.test)) {
-          if (p != "type") levels(bi.test[[p]]) <- c("0", "1") 
-        }
-        
-        model <- full.model[[as.character(k)]]
-        predictionLabels.test <- predict(model, newdata = bi.test, type='response')
-        predictionPrs.test <- predict(model, newdata = bi.test, type='prob')
-      } else { # For model 3
-        prs.table.test <- data.frame()
-        for (g in 1:(length(grp.names)-1)) {
-          for (r in (g+1):length(grp.names)) {
-            group1 <- grp.names[g]
-            group2 <- grp.names[r]
-            ktsp <- kpairs[[as.character(k)]][[sprintf('%s_%s', group1, group2)]]
-            
-            # Subset data & binarize
-            bi.test <- testdata[, ktsp$geneX] - testdata[, ktsp$geneY]
-            bi.test <- as.data.frame(ifelse(bi.test > 0, "1", "0"))
-            colnames(bi.test) <- sprintf("%s.%s", ktsp$geneX, ktsp$geneY)
-            bi.test <- cbind.data.frame(bi.test, type=labels)
-            for (p in names(bi.test)) {
-              if (p != "type") levels(bi.test[[p]]) <- c("0", "1")
-            }
-            
-            model <- full.model[[as.character(k)]][[sprintf('%s_%s', group1, group2)]]
-            predictionPrs.test <- predict(model, newdata=bi.test, type='prob')
-            predictionPrs.test <- predictionPrs.test[ ,c(group1, group2)]
-            colnames(predictionPrs.test) <- paste0(colnames(predictionPrs.test), paste0(".", sprintf('%s_%s', group1, group2)))
-            
-            # Combine & merge probability tables
-            if (nrow(prs.table.test) == 0) {
-              prs.table.test <- rbind.data.frame(prs.table.test, predictionPrs.test)
-            } else {
-              prs.table.test <- cbind.data.frame(prs.table.test, predictionPrs.test)
-            }
-          }
-        }
-        
-        # Optimize final probabilities using objective function
-        print('  Calculating final probs using our obj. func.')
-        predictionPrs.test <- opti.RFs(prs.table.test, grp.names)
-        predictionPrs.test$predict.grp <- colnames(predictionPrs.test)[apply(predictionPrs.test, 1, which.max)] -> predictionLabels.test
-      }
-      
-      # Performances
-      predictionLabels.test <- factor(predictionLabels.test, levels = levels(testLabels))
-      cm <- confusionMatrix(data=predictionLabels.test, reference=testLabels)
-      sensitivity <- as.numeric(cm$byClass[, 1])
-      specificity <- as.numeric(cm$byClass[, 2])
-      youden <- sensitivity + specificity - 1
-      names(youden) <- gsub('Class: ', '', rownames(cm$byClass))
-      test.results[[as.character(k)]][['ACC']] <- as.numeric(cm$overall['Accuracy'])
-      test.results[[as.character(k)]][['avg.sens']] <- sum(sensitivity)/length(sensitivity)
-      test.results[[as.character(k)]][['avg.spec']] <- sum(specificity)/length(specificity)
-      test.results[[as.character(k)]][['predictionLabels']] <- predictionLabels.test
-      test.results[[as.character(k)]][['predictionScores']] <- predictionPrs.test
-      test.results[[as.character(k)]][['cm']] <- cm
-      test.results[[as.character(k)]][['Youden']] <- youden
-      test.results[[as.character(k)]][['avg.yd']] <- sum(youden)/length(youden)
-      print(paste0(k, " - ACC:", round(test.results[[as.character(k)]]$ACC, 5)))
-    }
-  }
-  test.results
-}
+source('~/GoogleDrive/pjs/kTSP/code/utils.R')
 ```
 
 
 
 ### Set parameters and simulate training & testing data
 ```{R parameters}
-g.null <- 90
-g.sig <- 10
-n.train <- c(20, 20, 20) # class 0,1,2
-n.test <- c(20, 20, 20)
+g.null <- 160
+g.sig <- 40
+n.train <- c(80, 80, 80) # class 0,1,2
+n.test <- c(80, 80, 80)
 SDnullMu <- 5
-DFnullSD <- 4
-lb.shift <- 0.7
-ub.shift <- 1.2
+DFnullSD <- 7
+lb.shift <- 0.6
+ub.shift <- 1.1
 testMu.shift <- 0
-testSD.shift <- 1.5
+testSD.shift <- 4
+pShift <- 0.7
+
 
 Ks <- seq(10, 100, by=10)
 alpha <- c(0, 0.25, 0.5, 0.75, 1)
 ```
 
 
-```{R perform}
+```{R create}
 # Loop for different simulation with different alpha
 out.sets <- list()
 for (a in alpha) {
-  out <- simu.multi(g.null, g.sig, a, n.train, n.test, SDnullMu, DFnullSD, lb.shift, ub.shift, testMu.shift, testSD.shift)
+  out <- simu.multi(g.null, g.sig, a, n.train, n.test, SDnullMu, DFnullSD, lb.shift, ub.shift, testMu.shift, testSD.shift, pShift)
   out.sets[[as.character(a)]] <- out
   
-  # # Get results
+  # # # Get results
   # sig.idx <- out$sig.idx
   # expr.test <- out$Xtest
   # expr.train <- out$Xtrain
@@ -722,14 +54,14 @@ for (a in alpha) {
   # 
   # # Function for plots
   # add_legend <- function(...) {
-  #   opar <- par(fig=c(0, 1, 0, 1), oma=c(0, 0, 0, 0), 
+  #   opar <- par(fig=c(0, 1, 0, 1), oma=c(0, 0, 0, 0),
   #               mar=c(0, 0, 0, 0), new=TRUE)
   #   on.exit(par(opar))
   #   plot(0, 0, type='n', bty='n', xaxt='n', yaxt='n')
   #   legend(...)
   # }
-  
-  # Distribution of training set
+  # 
+  # # Distribution of training set
   # df <- expr.train # expr.test
   # par(mar = c(5, 4, 1.4, 0.2))
   # plot(NA, xlim=c(1, ncol(df)), ylim=range(df), xlab="Sample", ylab="Expression", main='Training Set')
@@ -756,7 +88,7 @@ for (a in alpha) {
 
 
 ### Loop over model baseline & 1 to 3
-```{R}
+```{R perform}
 all.results <- list()
 for (a in alpha) {
   print(paste0('The percentage of only-one-DE alpha = ', a))
@@ -774,7 +106,7 @@ for (a in alpha) {
   grps <- as.character(unique(lb.train))
   one.tsp <- getTSP(grps, expr.train, lb.train, 'one') 
   pw.tsp <- getTSP(grps, expr.train, lb.train, 'pairwise')
-  
+  kpairs <- list()
   
   # Train baseline model
   print(paste0('  Running baseline model...'))
@@ -782,35 +114,33 @@ for (a in alpha) {
   all.results[[as.character(a)]][['baseline']][['cv']] <- tsp.rf.cv(5, Ks, lb.train, as.data.frame(t(expr.train)), grps, kpairs, 0, baseline = TRUE)
   all.results[[as.character(a)]][['baseline']][['overall.cv']] <- getOverall(all.results[[as.character(a)]][['baseline']][['cv']], Ks, baseline = TRUE)
   all.results[[as.character(a)]][['baseline']][['full.model']] <- trainModel(as.data.frame(t(expr.train)), lb.train, Ks, grps, kpairs, 0, baseline = TRUE)
-  all.results[[as.character(a)]][['baseline']][['test']] <- testing(as.data.frame(t(expr.test)), lb.test, Ks, grps, kpairs,
-                                                    all.results[[as.character(a)]][['baseline']][['full.model']], 0, baseline=TRUE)
+  all.results[[as.character(a)]][['baseline']][['test']] <- testing(as.data.frame(t(expr.test)), lb.test, Ks, grps, kpairs, all.results[[as.character(a)]][['baseline']][['full.model']], 0, baseline=TRUE)
   
   # Loop over model 1 to 3
-  kpairs <- list()
-  for (i in 1:3) {
+  for (i in 1:2) {
     print(paste0('  Running model ', i, '...'))
     chri <- as.character(i)
     kpairs[[chri]] <- list()
     all.results[[as.character(a)]][[chri]] <- list()
     
     # Extract top K gene pairs
-    ifelse (i == 1, kpairs[[chri]] <- mergePairs(Ks, one.tsp, i), kpairs[[chri]] <- mergePairs(Ks, pw.tsp, i)) 
+    ifelse(i == 1, kpairs[[chri]] <- mergePairs(Ks, one.tsp, i), kpairs[[chri]] <- mergePairs(Ks, pw.tsp, i)) 
     
     # 5 fold cross-validation & performances
-    all.results[[as.character(a)]][[chri]][['cv']] <- tsp.rf.cv(5, Ks, lb.train, as.data.frame(t(expr.train)), grps, kpairs[[i]], i)
+    all.results[[as.character(a)]][[chri]][['cv']] <- tsp.rf.cv(5, Ks, lb.train, as.data.frame(t(expr.train)), grps, kpairs, i)
     all.results[[as.character(a)]][[chri]][['overall.cv']] <- getOverall(all.results[[as.character(a)]][[chri]][['cv']], Ks)
     
     # Train a model using all training set
-    all.results[[as.character(a)]][[chri]][['full.model']] <- trainModel(as.data.frame(t(expr.train)), lb.train, Ks, grps, kpairs[[i]], i)
+    all.results[[as.character(a)]][[chri]][['full.model']] <- trainModel(as.data.frame(t(expr.train)), lb.train, Ks, grps, kpairs, i)
     
     # Test on independent set
     all.results[[as.character(a)]][[chri]][['test']] <- testing(as.data.frame(t(expr.test)), lb.test, Ks, grps, 
-                                          kpairs[[i]], all.results[[as.character(a)]][[chri]][['full.model']], i)
+                                          kpairs, all.results[[as.character(a)]][[chri]][['full.model']], i)
   }
   all.results[[as.character(a)]][['kpairs']] <- kpairs
 }
 
-save(all.results, file = '~/ktsp/multi.results/simulation/all.results.Rdata')
+#save(all.results, file = '~/ktsp/multi.results/simulation/all.results.Rdata')
 ```
 
 
@@ -844,7 +174,8 @@ plot.perf <- function(modelName, a.results, Ks, name, listname, whichone) {
     #scale_y_continuous(breaks = seq(yrange[1], yrange[2], by=0.1), limits = yrange)
 }
 
-models <- c("baseline", "1", "2", "3")
+#models <- c("baseline", "1", "2", "3")
+models <- c("baseline", "1", "2")
 paras <- c('ACC', 'avg.sens', 'avg.spec', 'avg.yd')
 names <- c('Accuracy', 'Avg. Sensitivity', 'Avg. Specificity', 'Avg. Youden')
 
@@ -867,22 +198,11 @@ for (a in alpha) {
 
 ### Gene pairs
 ```{R, eval=F}
-# Grp1 pattern
+# Expression pattern
 plot(NA,xlim=c(1, ncol(expr.train)), ylim=range(expr.train), xlab="sample", ylab="expression")
-for(i in c(9,13)) {
+for(i in c(26,8)) {
   lines(x=1:ncol(expr.train), y=expr.train[i,], col=getColors(1))
 }
 
-# Grp2 pattern
-plot(NA,xlim=c(1, ncol(expr.test)), ylim=range(expr.test), xlab="sample", ylab="expression")
-for(i in c(14,9)) {
-  lines(x=1:ncol(expr.test), y=expr.test[i,], col=getColors(1))
-}
 
-# Grp3 pattern
-plot(NA,xlim=c(1, ncol(expr.train)), ylim=range(expr.train), xlab="sample", ylab="expression")
-for(i in c(10, 9)) {
-  lines(x=1:ncol(expr.train), y=expr.train[i,], col=getColors(1))
-}
 ```
-
