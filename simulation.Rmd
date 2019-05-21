@@ -135,16 +135,6 @@ for (a in alpha) {
     one.tsp <- getTSP(grps, expr.train, lb.train, 'one') 
     pw.tsp <- getTSP(grps, expr.train, lb.train, 'pairwise')
 
-    # Extract top k pairs for each model first
-    kpairs <- list()
-    for (i in 1:3) {
-      print(paste0('  Extract k pairs ', i, '...'))
-      chri <- as.character(i)
-      kpairs[[chri]] <- list()
-      # Extract top K gene pairs
-      ifelse(i == 1, kpairs[[chri]] <- mergePairs(Ks, one.tsp, i), kpairs[[chri]] <- mergePairs(Ks, pw.tsp, i)) 
-    }
-    
     # Train baseline model
     print(paste0('  Running baseline model...'))
     all.results[[as.character(a)]][[s]][['baseline']] <- list()
@@ -158,7 +148,12 @@ for (a in alpha) {
       print(paste0('  Running model ', i, '...'))
       chri <- as.character(i)
       all.results[[as.character(a)]][[s]][[chri]] <- list()
-
+      # Extract top k pairs for each model first
+      kpairs <- list()
+      kpairs[[chri]] <- list()
+      # Extract top K gene pairs
+      ifelse(i == 1, kpairs[[chri]] <- mergePairs(Ks, one.tsp, i), kpairs[[chri]] <- mergePairs(Ks, pw.tsp, i)) 
+      
       # 5 fold cross-validation & performances
       #all.results[[as.character(a)]][[s]][[chri]][['cv']] <- tsp.rf.cv(5, Ks, lb.train, as.data.frame(t(expr.train)), grps, kpairs, i)
       #all.results[[as.character(a)]][[s]][[chri]][['overall.cv']] <- getOverall(all.results[[as.character(a)]][[s]][[chri]][['cv']], Ks)
@@ -280,6 +275,8 @@ for (a in alpha) {
 }
 
 ```
+
+
 
 
 ### Gene pairs
