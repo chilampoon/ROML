@@ -13,29 +13,29 @@ suppressPackageStartupMessages({
   library(ggplot2)
   library(ggpubr)
 })
-
-source('~/GoogleDrive/pjs/kTSP/code/utils.R')
+source('~/ktsp/script/utils.R')
 ```
 
 
 
 ### Set parameters and simulate training & testing data
 ```{R parameters}
-g.null <- 160
+g.null <- 360
 g.sig <- 40
-n.train <- c(80, 80, 80) # class 0,1,2
-n.test <- c(80, 80, 80)
-SDnullMu <- 5
-DFnullSD <- 7
-lb.shift <- 0.6
-ub.shift <- 1.1
+n.train <- c(100, 100, 100) # class 0,1,2
+n.test <- c(100, 100, 100)
+SDnullMu <- 4 # can't be 0
+DFnullSD <- 5 # degree of freedom
+lb.shift <- 0.5
+ub.shift <- 1
 testMu.shift <- 0
-testSD.shift <- 4
+testSD.shift <- 5
 pShift <- 0.7
-
-
-Ks <- seq(10, 100, by=10)
-alpha <- c(0, 0.25, 0.5, 0.75, 1)
+Ks <- c(50)
+#alpha <- c(0, 0.25, 0.5, 0.75, 1)
+alpha <- 0
+set.seed(777)
+seeds <- sample(c(88:88888), 5, replace = F)
 ```
 
 
@@ -43,45 +43,70 @@ alpha <- c(0, 0.25, 0.5, 0.75, 1)
 # Loop for different simulation with different alpha
 out.sets <- list()
 for (a in alpha) {
-  out <- simu.multi(g.null, g.sig, a, n.train, n.test, SDnullMu, DFnullSD, lb.shift, ub.shift, testMu.shift, testSD.shift, pShift)
-  out.sets[[as.character(a)]] <- out
-  
-  # # # Get results
-  # sig.idx <- out$sig.idx
-  # expr.test <- out$Xtest
-  # expr.train <- out$Xtrain
-  # 
-  # 
-  # # Function for plots
-  # add_legend <- function(...) {
-  #   opar <- par(fig=c(0, 1, 0, 1), oma=c(0, 0, 0, 0),
-  #               mar=c(0, 0, 0, 0), new=TRUE)
-  #   on.exit(par(opar))
-  #   plot(0, 0, type='n', bty='n', xaxt='n', yaxt='n')
-  #   legend(...)
-  # }
-  # 
-  # # Distribution of training set
-  # df <- expr.train # expr.test
-  # par(mar = c(5, 4, 1.4, 0.2))
-  # plot(NA, xlim=c(1, ncol(df)), ylim=range(df), xlab="Sample", ylab="Expression", main='Training Set')
-  # for (i in (length(sig.idx[sig.idx!='N'])+1):nrow(df)) {
-  #   lines(x=1:ncol(df), y=df[i,], col="lightgrey")
-  # }
-  # aidx <- length(sig.idx[sig.idx=='A'])
-  # if (aidx != 0) {
-  #   for (i in 1:aidx) {
-  #     lines(x=1:ncol(df), y=df[i, ], col="#E74C3C")
-  #   }
-  # }
-  # if (length(sig.idx[sig.idx=='B']) != 0) {
-  #   for (i in (aidx+1):length(sig.idx[sig.idx!='N'])) {
-  #     lines(x=1:ncol(df), y=df[i,], col="#69D6D2")
-  #   }
-  # }
-  # add_legend('topright', legend=c('Type A', 'Type B', 'Null'), pch=20, cex=0.8, bty='n',
-  #        horiz=T, col=c("#E74C3C", "#1FD1D4", "#e2e2e4"))
-  
+  out.sets[[as.character(a)]] <- list()
+  for (s in 1:length(seeds)) {
+    out.sets[[as.character(a)]][[s]] <- list()
+    seed <- seeds[s]
+    out <- simu.multi(g.null, g.sig, a, n.train, n.test, SDnullMu, DFnullSD, lb.shift, ub.shift, testMu.shift, testSD.shift, pShift, seed=seed)
+    out.sets[[as.character(a)]][[s]] <- out
+
+    # Get results
+    sig.idx <- out$sig.idx
+    expr.test <- out$Xtest
+    expr.train <- out$Xtrain
+
+
+    # Function for plots
+    add_legend <- function(...) {
+      opar <- par(fig=c(0, 1, 0, 1), oma=c(0, 0, 0, 0),
+                  mar=c(0, 0, 0, 0), new=TRUE)
+      on.exit(par(opar))
+      plot(0, 0, type='n', bty='n', xaxt='n', yaxt='n')
+      legend(...)
+    }
+
+    # Distribution of training set
+    df <- expr.train # expr.test
+    par(mar = c(5, 4, 1.4, 0.2))
+    plot(NA, xlim=c(1, ncol(df)), ylim=range(df), xlab="Sample", ylab="Expression", main='Training Set')
+    for (i in (length(sig.idx[sig.idx!='N'])+1):nrow(df)) {
+      lines(x=1:ncol(df), y=df[i,], col="lightgrey")
+    }
+    aidx <- length(sig.idx[sig.idx=='A'])
+    if (aidx != 0) {
+      for (i in 1:aidx) {
+        lines(x=1:ncol(df), y=df[i, ], col="#E74C3C")
+      }
+    }
+    if (length(sig.idx[sig.idx=='B']) != 0) {
+      for (i in (aidx+1):length(sig.idx[sig.idx!='N'])) {
+        lines(x=1:ncol(df), y=df[i,], col="#69D6D2")
+      }
+    }
+    add_legend('topright', legend=c('Type A', 'Type B', 'Null'), pch=20, cex=0.8, bty='n',
+           horiz=T, col=c("#E74C3C", "#1FD1D4", "#e2e2e4"))
+    
+    # Distribution of testing set
+    df <- expr.test
+    par(mar = c(5, 4, 1.4, 0.2))
+    plot(NA, xlim=c(1, ncol(df)), ylim=range(df), xlab="Sample", ylab="Expression", main='Testing Set')
+    for (i in (length(sig.idx[sig.idx!='N'])+1):nrow(df)) {
+      lines(x=1:ncol(df), y=df[i,], col="lightgrey")
+    }
+    aidx <- length(sig.idx[sig.idx=='A'])
+    if (aidx != 0) {
+      for (i in 1:aidx) {
+        lines(x=1:ncol(df), y=df[i, ], col="#E74C3C")
+      }
+    }
+    if (length(sig.idx[sig.idx=='B']) != 0) {
+      for (i in (aidx+1):length(sig.idx[sig.idx!='N'])) {
+        lines(x=1:ncol(df), y=df[i,], col="#69D6D2")
+      }
+    }
+    add_legend('topright', legend=c('Type A', 'Type B', 'Null'), pch=20, cex=0.8, bty='n',
+           horiz=T, col=c("#E74C3C", "#1FD1D4", "#e2e2e4"))
+  }
 }
 ```
 
@@ -89,57 +114,65 @@ for (a in alpha) {
 
 ### Loop over model baseline & 1 to 3
 ```{R perform}
+# (CV) and testing
 all.results <- list()
 for (a in alpha) {
-  print(paste0('The percentage of only-one-DE alpha = ', a))
   all.results[[as.character(a)]] <- list()
-  out <- out.sets[[as.character(a)]]
-  
-  # Get outputs
-  expr.train <- out$Xtrain
-  expr.test <- out$Xtest
-  lb.train <- out$Ytrain
-  lb.test <- out$Ytest
-  sig.dix <- out$sig.idx
-  
-  # Calculate ktsp scores in different ways
-  grps <- as.character(unique(lb.train))
-  one.tsp <- getTSP(grps, expr.train, lb.train, 'one') 
-  pw.tsp <- getTSP(grps, expr.train, lb.train, 'pairwise')
-  kpairs <- list()
-  
-  # Train baseline model
-  print(paste0('  Running baseline model...'))
-  all.results[[as.character(a)]][['baseline']] <- list()
-  all.results[[as.character(a)]][['baseline']][['cv']] <- tsp.rf.cv(5, Ks, lb.train, as.data.frame(t(expr.train)), grps, kpairs, 0, baseline = TRUE)
-  all.results[[as.character(a)]][['baseline']][['overall.cv']] <- getOverall(all.results[[as.character(a)]][['baseline']][['cv']], Ks, baseline = TRUE)
-  all.results[[as.character(a)]][['baseline']][['full.model']] <- trainModel(as.data.frame(t(expr.train)), lb.train, Ks, grps, kpairs, 0, baseline = TRUE)
-  all.results[[as.character(a)]][['baseline']][['test']] <- testing(as.data.frame(t(expr.test)), lb.test, Ks, grps, kpairs, all.results[[as.character(a)]][['baseline']][['full.model']], 0, baseline=TRUE)
-  
-  # Loop over model 1 to 3
-  for (i in 1:2) {
-    print(paste0('  Running model ', i, '...'))
-    chri <- as.character(i)
-    kpairs[[chri]] <- list()
-    all.results[[as.character(a)]][[chri]] <- list()
+  for (s in 1:length(seeds)) {
+    print(paste0('The percentage of only-one-DE alpha = ', a))
+    all.results[[as.character(a)]][[s]] <- list()
+    out <- out.sets[[as.character(a)]][[s]]
     
-    # Extract top K gene pairs
-    ifelse(i == 1, kpairs[[chri]] <- mergePairs(Ks, one.tsp, i), kpairs[[chri]] <- mergePairs(Ks, pw.tsp, i)) 
-    
-    # 5 fold cross-validation & performances
-    all.results[[as.character(a)]][[chri]][['cv']] <- tsp.rf.cv(5, Ks, lb.train, as.data.frame(t(expr.train)), grps, kpairs, i)
-    all.results[[as.character(a)]][[chri]][['overall.cv']] <- getOverall(all.results[[as.character(a)]][[chri]][['cv']], Ks)
-    
-    # Train a model using all training set
-    all.results[[as.character(a)]][[chri]][['full.model']] <- trainModel(as.data.frame(t(expr.train)), lb.train, Ks, grps, kpairs, i)
-    
-    # Test on independent set
-    all.results[[as.character(a)]][[chri]][['test']] <- testing(as.data.frame(t(expr.test)), lb.test, Ks, grps, 
-                                          kpairs, all.results[[as.character(a)]][[chri]][['full.model']], i)
-  }
-  all.results[[as.character(a)]][['kpairs']] <- kpairs
-}
+    # Get outputs
+    expr.train <- out$Xtrain # 400 300 gene by sample
+    expr.test <- out$Xtest
+    lb.train <- out$Ytrain
+    lb.test <- out$Ytest
+    sig.dix <- out$sig.idx
 
+    # Extract top k pairs for each model first
+    grps <- as.character(unique(lb.train))
+    one.tsp <- getTSP(grps, expr.train, lb.train, 'one') 
+    pw.tsp <- getTSP(grps, expr.train, lb.train, 'pairwise')
+
+    # Extract top k pairs for each model first
+    kpairs <- list()
+    for (i in 1:3) {
+      print(paste0('  Extract k pairs ', i, '...'))
+      chri <- as.character(i)
+      kpairs[[chri]] <- list()
+      # Extract top K gene pairs
+      ifelse(i == 1, kpairs[[chri]] <- mergePairs(Ks, one.tsp, i), kpairs[[chri]] <- mergePairs(Ks, pw.tsp, i)) 
+    }
+    
+    # Train baseline model
+    print(paste0('  Running baseline model...'))
+    all.results[[as.character(a)]][[s]][['baseline']] <- list()
+    #all.results[[as.character(a)]][[s]][['baseline']][['cv']] <- tsp.rf.cv(5, Ks, lb.train, as.data.frame(t(expr.train)), grps, kpairs, 0, baseline = TRUE)
+    #all.results[[as.character(a)]][[s]][['baseline']][['overall.cv']] <- getOverall(all.results[[as.character(a)]][[s]][['baseline']][['cv']], Ks, baseline = TRUE)
+    all.results[[as.character(a)]][[s]][['baseline']][['full.model']] <- trainModel(as.data.frame(t(expr.train)), lb.train, Ks, grps, kpairs, 0, baseline = TRUE)
+    all.results[[as.character(a)]][[s]][['baseline']][['test']] <- testing(as.data.frame(t(expr.test)), lb.test, Ks, grps, kpairs, all.results[[as.character(a)]][[s]][['baseline']][['full.model']], 0, baseline=TRUE)
+    
+    # Loop over model 1 to 3
+    for (i in 1:2) {
+      print(paste0('  Running model ', i, '...'))
+      chri <- as.character(i)
+      all.results[[as.character(a)]][[s]][[chri]] <- list()
+
+      # 5 fold cross-validation & performances
+      #all.results[[as.character(a)]][[s]][[chri]][['cv']] <- tsp.rf.cv(5, Ks, lb.train, as.data.frame(t(expr.train)), grps, kpairs, i)
+      #all.results[[as.character(a)]][[s]][[chri]][['overall.cv']] <- getOverall(all.results[[as.character(a)]][[s]][[chri]][['cv']], Ks)
+      
+      # Train a model using all training set
+      all.results[[as.character(a)]][[s]][[chri]][['full.model']] <- trainModel(as.data.frame(t(expr.train)), lb.train, Ks, grps, kpairs, i)
+      
+      # Test on independent set
+      all.results[[as.character(a)]][[s]][[chri]][['test']] <- testing(as.data.frame(t(expr.test)), lb.test, Ks, grps, kpairs, all.results[[as.character(a)]][[s]][[chri]][['full.model']], i)
+      all.results[[as.character(a)]][[s]][['kpairs']] <- kpairs
+    }
+    save(all.results, file = '~/ktsp/multi.results/simulation/new.Rdata')
+  }
+}
 #save(all.results, file = '~/ktsp/multi.results/simulation/all.results.Rdata')
 ```
 
@@ -147,62 +180,133 @@ for (a in alpha) {
 
 ### Draw the performances
 ```{R draw}
-plot.perf <- function(modelName, a.results, Ks, name, listname, whichone) {
-  df <- setNames(data.frame(matrix(ncol=3, nrow=0)), c('K', listname, 'model'))
-  for (n in modelName) {
-    if (whichone == "CV") {
-      overall <- a.results[[n]][['overall.cv']]
-    } else if (whichone == "Test") {
-      overall <- a.results[[n]][['test']]
-    } else {print('whichone only include CV or Test!')}
-
-    for (k in 1:length(Ks)) {
-      K <- Ks[k]
-      ifelse(n == "baseline", df[nrow(df)+1, ][[listname]] <- overall[[listname]], 
-                              df[nrow(df)+1, ][[listname]] <- overall[[as.character(K)]][[listname]])
-      df[nrow(df), ]$model <- paste0(n)
-      df[nrow(df), ]$K <- K
+plot.perf <- function(models, a.results, Ks, name, listname, whichone, times) {
+  df <- setNames(data.frame(matrix(ncol=4, nrow=0)), c('K', 'mean', 'sd', 'model'))
+  for (n in models) {
+    for (K in Ks) {
+      means <- c()
+      for (t in 1:times) {
+        if (n == 'baseline') {
+          if (whichone == "CV") {
+            means <- c(means, a.results[[t]][[n]][["overall.cv"]][[listname]])
+          } else if (whichone == "Test") {
+            means <- c(means, a.results[[t]][[n]][["test"]][[listname]])
+          } else {print('whichone only include CV or Test!')}
+        } else {
+          if (whichone == "CV") {
+            means <- c(means, a.results[[t]][[n]][["overall.cv"]][[as.character(K)]][[listname]])
+          } else if (whichone == "Test") {
+            means <- c(means, a.results[[t]][[n]][["test"]][[as.character(K)]][[listname]])
+          } else {print('whichone only include CV or Test!')}
+        }
+      }
+      mean <- mean(means)
+      sd <- sd(means)
+      df[nrow(df)+1, ][['mean']] <- mean
+      df[nrow(df), ][['sd']] <- sd
+      df[nrow(df), ][['model']] <- n
+      df[nrow(df), ][['K']] <- K
     }
   }
   rownames(df) <- NULL
   df$K <- factor(df$K)
   #colrs <- getColors(length(modelName))
   
-  ggplot(df, aes(x=K, y=get(listname), group=model)) + geom_line(aes(color=model)) + 
-    geom_point(aes(color=model)) + scale_color_manual(values = rev(brewer.pal(4,"Spectral"))) +
+  ggplot(df, aes(x=K, y=mean, group=model, color=model)) + geom_line(aes(color=model)) + #+ geom_bar(stat="identity", position=position_dodge()) +
+  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), width=.2, position=position_dodge(0.25)) + scale_fill_manual(values = rev(brewer.pal(4,"Spectral"))) +
+    geom_point(aes(color=model)) +# scale_color_manual(values = rev(brewer.pal(4,"Spectral"))) +
     theme_bw() + labs(y=name) 
     #scale_y_continuous(breaks = seq(yrange[1], yrange[2], by=0.1), limits = yrange)
 }
 
 #models <- c("baseline", "1", "2", "3")
-models <- c("baseline", "1", "2")
-paras <- c('ACC', 'avg.sens', 'avg.spec', 'avg.yd')
-names <- c('Accuracy', 'Avg. Sensitivity', 'Avg. Specificity', 'Avg. Youden')
+#paras <- c('ACC', 'avg.sens', 'avg.spec', 'avg.yd')
+#names <- c('Accuracy', 'Avg. Sensitivity', 'Avg. Specificity', 'Avg. Youden')
 
+models <- c("baseline", "1", "2")
+paras <- c('ACC')
+names <- c('Accuracy')
+
+times <- length(seeds)
 for (a in alpha) {
   a.results <- all.results[[as.character(a)]]
   for (i in 1:length(paras)) {
     name <- names[i]
     listname <- paras[i]
-    assign(paste0("p", i) ,plot.perf(models, a.results, Ks, name, listname, 'CV'))
-    assign(paste0("t", i) ,plot.perf(models, a.results, Ks, name, listname, 'Test'))
+    #assign(paste0("p", i) ,plot.perf(models, a.results, Ks, name, listname, 'CV', times))
+    assign(paste0("t", i) ,plot.perf(models, a.results, Ks, name, listname, 'Test', times))
   }
-  fig <- ggarrange(p1, p2, p3, p4, nrow=2, ncol=2, common.legend=T, legend='right')
-  print(annotate_figure(fig, top=paste0('5 Fold Cross Validation', ' | alpha = ', a)))
-
-  fig <- ggarrange(t1, t2, t3, t4, nrow=2, ncol=2, common.legend=T, legend='right')
-  print(annotate_figure(fig, top=paste0('Testing', ' | alpha = ', a)))
+  #fig <- ggarrange(p1, p2, p3, p4, nrow=2, ncol=2, common.legend=T, legend='right')
+  #fig <- ggarrange(p1, nrow=2, ncol=2, common.legend=T, legend='right')
+  #print(annotate_figure(p1, top=paste0('5 Fold Cross Validation', ' | alpha = ', a)))
+  #fig <- ggarrange(t1, t2, t3, t4, nrow=2, ncol=2, common.legend=T, legend='right')
+  #fig <- ggarrange(t1, nrow=2, ncol=2, common.legend=T, legend='right')
+  print(annotate_figure(t1, top=paste0('Testing', ' | alpha = ', a)))
 }
+```
+
+### Look into high-ranked features in random forest
+```{R}
+ImpFea <- function(all.results, model, alpha, Ks, times) {
+  printFea <- function(full.model, title) {
+    imp.df <- varImp(full.model)
+    imp.df <- imp.df[order(-imp.df$Overall), ,drop=F]
+    imp.df$varName <- rownames(imp.df)
+    p <- ggplot(imp.df[1:20,], aes(x=reorder(varName, Overall),y=Overall)) + geom_point() + coord_flip() +
+      ggtitle(title) +
+      theme_minimal()
+    print(p)
+  }
+  
+  for (t in 1:times) {
+    if (model == 'baseline') {
+      full.model <- all.results[[as.character(alpha)]][[t]][[model]][['full.model']]
+      title <- paste0("Baseline model dataset ", t ,": Top 40 variables | alpha = ", alpha)
+      printFea(full.model, title)
+    } else {
+      for (K in Ks) {
+        full.model <- all.results[[as.character(alpha)]][[t]][[model]][['full.model']][[as.character(K)]]
+        title <- paste0("Model ", model, " dataset ", t ,": Top 40 variables | alpha = ", alpha, " K = ", K)
+        printFea(full.model, title)
+      }
+    }
+  }
+}
+
+for (a in alpha) {
+  for (model in models) {
+    ImpFea(all.results, model, a, Ks, times)
+  }
+}
+
 ```
 
 
 ### Gene pairs
 ```{R, eval=F}
 # Expression pattern
-plot(NA,xlim=c(1, ncol(expr.train)), ylim=range(expr.train), xlab="sample", ylab="expression")
-for(i in c(26,8)) {
-  lines(x=1:ncol(expr.train), y=expr.train[i,], col=getColors(1))
+pair <- c(13,21)
+alpha <- 0
+dataset <- 1
+
+cols <- c('#709f47', '#dd5f40')
+plotE <- out.sets[[as.character(alpha)]][[dataset]]$Xtrain
+par(mar = c(5, 4, 1.4, 0.2))
+plot(NA,xlim=c(1, ncol(plotE)), ylim=range(plotE), xlab="sample", ylab="Train Expr", main=paste0('Gene ',pair[1],',', pair[2], ' in training'))
+for(i in 1:length(pair)) {
+  lines(x=1:ncol(plotE), y=plotE[pair[i],], col=cols[i])
 }
+add_legend('topright', legend=c(pair[1], pair[2]), pch=20, cex=0.8, bty='n',
+       horiz=T, col=cols)
+
+plotE <- out.sets[[as.character(alpha)]][[dataset]]$Xtest
+par(mar = c(5, 4, 1.4, 0.2))
+plot(NA,xlim=c(1, ncol(plotE)), ylim=range(plotE), xlab="sample", ylab="Test Expr", main=paste0('Gene ',pair[1],',', pair[2], ' in testing'))
+for(i in 1:length(pair)) {
+  lines(x=1:ncol(plotE), y=plotE[pair[i],], col=cols[i])
+}
+add_legend('topright', legend=c(pair[1], pair[2]), pch=20, cex=0.8, bty='n',
+       horiz=T, col=cols)
 
 
 ```
