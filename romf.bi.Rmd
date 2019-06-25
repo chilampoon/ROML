@@ -1,0 +1,313 @@
+---
+title: "LumA vs LumB - ROML(RF)"
+author: "Poon Chi Lam"
+date: "6/21/2019"
+output: html_document
+---
+
+Here we proposed the order-based models combining random forest algorithm:
+
+- Main steps:
+1. Filter out 50% low-mean genes
+2. Calculate KTSP scores for feature selection
+3. Convert into 0-1 binary features
+Need to do something for DEs & non-DEs?
+4. RF workflow
+
+```{R setup}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(randomForest)
+  library(nloptr)
+  library(caret)
+  library(switchBox)
+})
+```
+
+
+## Functions
+```{R}
+# Filter out low-mean genes
+lowMeans.filter <- function(cal.mat, percent) {
+  means <- data.frame(means = rowMeans(cal.mat), ranks = rank(rowMeans(cal.mat)))
+  cuts <- quantile(means$ranks, probs = seq(0, 1, 0.05))
+  
+  # Top n% genes (rank() is from the smallest to largest)
+  cut.percent <- paste0((100 - percent), "%")
+  means <- means[which(means$ranks >= cuts[cut.percent]), ]
+  sub.genes <- rownames(means)
+  sub.genes
+}
+
+
+# Calculate TSP scores - for binary outcome only
+getTSP <- function(expr, labels) {
+  grp.vec <- factor(labels)
+  tmp <- SWAP.CalculateScores(as.matrix(expr), grp.vec, FilterFunc = NULL)
+  tmp <- data.frame(score = sort(tmp$score, decreasing = T))
+  tmp$geneX <- gsub('^(.*?),.*', '\\1', rownames(tmp))
+  tmp$geneY <- gsub('^(.*?),', '', rownames(tmp))
+  rownames(tmp) <- NULL
+  tmp
+}
+
+
+# Merge k gene pairs from each group
+mergePairs <- function(Ks, tsp.df) {
+  kpairs <- list()
+  # Extract k pairs
+  for (K in Ks) {
+    table <- tsp.df[1:K, ] %>% select(-score)
+    kpairs[[as.character(K)]] <- rbind.data.frame(kpairs[[as.character(K)]], table)
+  }
+  kpairs
+}
+
+
+# Cross-validation
+tsp.rf.cv <- function(nfold, Ks, labels, dataframe, kpairs) {
+  # Create folds
+  folds <- createFolds(labels, k=nfold)
+  results.list <- list()
+  
+  # Outer loop for cross-validation
+  # Intermediate loop for different Ks
+  # Inner loop for different classes
+  for (i in 1:nfold) {
+    results.list[[i]] <- list()
+    # 1/5 of the dataset as validation, remaining data for training
+    cv.train <- dataframe[-folds[[i]], ]
+    cv.train.labels <- labels[-folds[[i]]]
+    cv.validate <- dataframe[folds[[i]], ]
+    cv.validate.labels <- labels[folds[[i]]]
+    
+    for (K in Ks) {
+      results.list[[i]][[as.character(K)]] <- list()
+      print(paste0(i, ' - ', K))
+      all.tsp <- kpairs[[as.character(K)]]
+      # Create binary matrices for gene ranks
+      bi.cv.train <- cv.train[ ,all.tsp$geneX] - cv.train[ ,all.tsp$geneY]
+      bi.cv.train <- as.data.frame(ifelse(bi.cv.train > 0, "1", "0"))
+      colnames(bi.cv.train) <- sprintf("%s.%s", all.tsp$geneX, all.tsp$geneY)
+      bi.cv.train <- cbind.data.frame(bi.cv.train, type=cv.train.labels)
+      
+      bi.cv.validate <- cv.validate[ ,all.tsp$geneX] - cv.validate[ ,all.tsp$geneY]
+      bi.cv.validate <- as.data.frame(ifelse(bi.cv.validate > 0, "1", "0"))
+      colnames(bi.cv.validate) <- sprintf("%s.%s", all.tsp$geneX, all.tsp$geneY)
+      bi.cv.validate <- cbind.data.frame(bi.cv.validate, type=cv.validate.labels)
+      for (p in names(bi.cv.validate)) { # Ensure the levels of predictors are same in train & validate
+        if (p != "type") levels(bi.cv.validate[[p]]) <- c("0", "1") -> levels(bi.cv.train[[p]])
+      }
+      
+      # Build random forest
+      rf.model <- randomForest(type~., data = bi.cv.train, ntree = 500, replace = F) 
+      results.list[[i]][[as.character(K)]][['RFmodels']] <- rf.model
+      predictionLabels <- predict(rf.model, newdata=bi.cv.validate, type='response')
+      predictionPrs <- predict(rf.model, newdata=bi.cv.validate, type='prob')
+      
+      # Store performances
+      predictionLabels <- factor(predictionLabels, levels = levels(labels))
+      cm <- confusionMatrix(data=as.factor(predictionLabels), reference=as.factor(cv.validate.labels))
+      sensitivity <- as.numeric(cm$byClass['sensitivity'])
+      specificity <- as.numeric(cm$byClass['specificity'])
+      youden <- sensitivity + specificity - 1
+      names(youden) <- gsub('Class: ', '', rownames(cm$byClass))
+      results.list[[i]][[as.character(K)]][['trueLabels']] <- cv.validate.labels
+      results.list[[i]][[as.character(K)]][['predictionLabels']] <- predictionLabels
+      results.list[[i]][[as.character(K)]][['predictionScores']] <- predictionPrs
+      results.list[[i]][[as.character(K)]][['ConfusionMatrix']] <- cm
+      results.list[[i]][[as.character(K)]][['Sens']] <- sensitivity
+      results.list[[i]][[as.character(K)]][['Specs']] <- specificity
+      results.list[[i]][[as.character(K)]][['ACC']] <- as.numeric(cm$overall['Accuracy'])
+      results.list[[i]][[as.character(K)]][['Youden']] <- youden
+      results.list[[i]][['AUC']] <- auc(roc(response=as.vector(cv.validate.labels), predictor=as.vector(predictionPrs[ ,1]), quiet = T))
+    }
+  }
+  results.list
+}
+
+
+# Get overall values of performances from CV results
+getOverall <- function(results.list, Ks) {
+  overall <- list()
+  for (k in 1:length(Ks)) {
+    K <- Ks[k]
+    overall[[as.character(K)]] <- list()
+    all.true.labels <- c()
+    all.predict.labels <- c()
+    all.predict.scores <- c()
+    for (f in 1:length(results.list)) {
+      all.true.labels <- c(all.true.labels, as.character(results.list[[f]][[as.character(K)]][['trueLabels']]))
+      all.predict.labels <- c(all.predict.labels, as.character(results.list[[f]][[as.character(K)]][['predictionLabels']]))
+      all.predict.scores <- rbind(all.predict.scores, results.list[[f]][[as.character(K)]][['predictionScores']])
+    }
+    
+    all.cm <- confusionMatrix(data=as.factor(all.predict.labels), reference=as.factor(all.true.labels))
+    overall[[as.character(K)]][['ACC']] <- as.numeric(all.cm$overall['Accuracy'])
+    overall[[as.character(K)]][['Sensitivity']] <- as.numeric(all.cm$byClass['Sensitivity']) -> all.sens
+    overall[[as.character(K)]][['Specificity']] <- as.numeric(all.cm$byClass['Specificity']) -> all.spec
+    all.youden <- all.sens + all.spec - 1
+    names(all.youden) <- gsub('Class: ', '', rownames(all.cm$byClass))
+    overall[[as.character(K)]][['Youden']] <- all.youden
+    overall[[as.character(K)]][['predictionScores']] <- all.predict.scores
+    overall[[as.character(K)]][['cm']] <- all.cm
+    overall[[as.character(K)]][['avg.sens']] <- mean(all.sens)
+    overall[[as.character(K)]][['avg.spec']] <- mean(all.spec)
+    overall[[as.character(K)]][['avg.yd']] <- mean(all.youden)
+    overall[[as.character(K)]][['AUC']] <- auc(roc(response=as.vector(all.true.labels), predictor=as.vector(all.predict.scores[ ,1]), quiet = T))
+  }
+  overall
+}
+
+
+# Train a full model
+bi.trainM <- function(dataframe, labels, Ks, kpairs) {
+  model <- list()
+  for (K in Ks) {
+    ktsp <- kpairs[[as.character(K)]]
+    bi.train <- dataframe[ ,ktsp$geneX] - dataframe[ ,ktsp$geneY]
+    bi.train <- as.data.frame(ifelse(bi.train > 0, "1", "0"))
+    colnames(bi.train) <- sprintf("%s.%s", ktsp$geneX, ktsp$geneY)
+    bi.train <- cbind.data.frame(bi.train, type=labels)
+    for (p in names(bi.train)) {
+      if (p != "type") levels(bi.train[[p]]) <- c("0", "1") 
+    }
+    model[[as.character(K)]] <- randomForest(type~., data = bi.train, ntree = 500, replace = F) 
+  }
+  model
+}
+
+
+# Testing
+bi.test <- function(testdata, testLabels, Ks, kpairs, full.model) {
+  test.results <- list()
+  for (k in Ks) {
+    test.results[[as.character(k)]] <- list()
+    
+    # Subset data & binarize
+    all.tsp <- kpairs[[as.character(k)]]
+    bi.test <- testdata[ ,all.tsp$geneX] - testdata[ ,all.tsp$geneY]
+    bi.test <- as.data.frame(ifelse(bi.test > 0, "1", "0"))
+    colnames(bi.test) <- sprintf("%s.%s", all.tsp$geneX, all.tsp$geneY)
+    bi.test <- cbind.data.frame(bi.test, type=testLabels)
+    for (p in names(bi.test)) {
+      if (p != "type") levels(bi.test[[p]]) <- c("0", "1") 
+    }
+    
+    model <- full.model[[as.character(k)]]
+    predictionLabels.test <- predict(model, newdata = bi.test, type='response')
+    predictionPrs.test <- predict(model, newdata = bi.test, type='prob')
+
+    # Performances
+    predictionLabels.test <- factor(predictionLabels.test, levels = levels(testLabels))
+    cm <- confusionMatrix(data=predictionLabels.test, reference=testLabels)
+    sensitivity <- as.numeric(cm$byClass['Sensitivity'])
+    specificity <- as.numeric(cm$byClass['Sensitivity'])
+    youden <- sensitivity + specificity - 1
+    names(youden) <- gsub('Class: ', '', rownames(cm$byClass))
+    test.results[[as.character(k)]][['ACC']] <- as.numeric(cm$overall['Accuracy'])
+    test.results[[as.character(k)]][['avg.sens']] <- mean(sensitivity)
+    test.results[[as.character(k)]][['avg.spec']] <- mean(specificity)
+    test.results[[as.character(k)]][['predictionLabels']] <- predictionLabels.test
+    test.results[[as.character(k)]][['predictionScores']] <- predictionPrs.test
+    test.results[[as.character(k)]][['cm']] <- cm
+    test.results[[as.character(k)]][['Youden']] <- youden
+    test.results[[as.character(k)]][['avg.yd']] <- mean(youden)
+    test.results[[as.character(k)]][['AUC']] <- auc(roc(response=as.vector(testLabels), predictor=as.vector(predictionPrs.test[ ,1]), quiet = T))
+    print(paste0(k, " - ACC:", round(test.results[[as.character(k)]]$ACC, 5)))
+    print(test.results[[as.character(k)]][['cm']])
+  }
+  test.results
+}
+
+```
+
+
+## Load data
+```{R load}
+data.dir <- '~/GoogleDrive/pjs/kTSP/data'
+load(file.path(data.dir, "BRCA.expr.Rdata"))
+load(file.path(data.dir, "BRCA.clinic.Rdata"))
+load(file.path(data.dir, "MB.expr.Rdata"))
+load(file.path(data.dir, "MB.clinic.Rdata"))
+```
+
+
+## Extract LumA & LumB samples
+```{R extract}
+brca.clin <- brca.clinic[brca.clinic$final_assign %in% c('LumA', 'LumB'),]
+brca.expr <- brca.expr[ ,which(colnames(brca.expr) %in% rownames(brca.clin))]
+mb.clin <- mb.clinic[mb.clinic$NOT_IN_OSLOVAL_Pam50Subtype %in% c('LumA', 'LumB'),]
+mb.expr <- mb.expr[,which(colnames(mb.expr) %in% rownames(mb.clin))]
+dim(brca.clin);dim(brca.expr);dim(mb.clin);dim(mb.expr)
+```
+
+## TCGA as training
+```{R tcga}
+Ks <- c(50, 100, 500, 1000, 2000, 5000)
+
+tcga.sub <- lowMeans.filter(brca.expr, 50)
+length(tcga.sub)
+data.train <- brca.expr[which(rownames(brca.expr) %in% tcga.sub),]
+data.test <- mb.expr[which(rownames(mb.expr) %in% tcga.sub),]
+lb.train <- factor(brca.clin$final_assign)
+lb.test <- factor(mb.clin$NOT_IN_OSLOVAL_Pam50Subtype)
+
+bi.tsp <- getTSP(data.train, lb.train)
+tcga.kpairs <- mergePairs(Ks, bi.tsp)
+tcga.cv <- tsp.rf.cv(5, Ks, lb.train, as.data.frame(t(data.train)), tcga.kpairs)
+tcga.cv.overall <- getOverall(tcga.cv, Ks)
+
+tcga.full.model <- bi.trainM(as.data.frame(t(data.train)), lb.train, Ks, tcga.kpairs)
+tcga.test <- bi.test(as.data.frame(t(data.test)), lb.test, Ks, tcga.kpairs, tcga.full.model)
+save(tcga.kpairs, tcga.cv, tcga.cv.overall, tcga.full.model, tcga.test, file=file.path(data.dir, 'tcga.biroml.Rdata'))
+```
+
+
+## MetaBric as training
+```{R mb}
+mb.sub <- lowMeans.filter(mb.expr, 50)
+length(mb.sub)
+data.train <- mb.expr[which(rownames(mb.expr) %in% mb.sub),]
+data.test <- brca.expr[which(rownames(brca.expr) %in% mb.sub),]
+lb.train <- factor(mb.clin$NOT_IN_OSLOVAL_Pam50Subtype)
+lb.test <- factor(brca.clin$final_assign)
+
+bi.tsp <- getTSP(data.train, lb.train)
+mb.kpairs <- mergePairs(Ks, bi.tsp)
+mb.cv <- tsp.rf.cv(5, Ks, lb.train, as.data.frame(t(data.train)), mb.kpairs)
+mb.cv.overall <- getOverall(mb.cv, Ks)
+
+mb.full.model <- bi.trainM(as.data.frame(t(data.train)), lb.train, Ks, mb.kpairs)
+mb.test <- bi.test(as.data.frame(t(data.test)), lb.test, Ks, mb.kpairs, mb.full.model)
+save(mb.kpairs, mb.cv, mb.cv.overall, mb.full.model, mb.test, file=file.path(data.dir, 'mb.biroml.Rdata'))
+```
+
+
+## Visualization
+```{R vis, fig.width=12, fig.height=4}
+draw.perf <- function(name) {
+  plot.df <- data.frame(K=as.character(Ks), 
+                      value=rep(0, length(Ks)))
+  # CV acc
+  plot.df$value <- sapply(plot.df$K, function(x) get(paste0(name, '.cv.overall'))[[as.character(x)]][['ACC']])
+  g1 <- ggplot(plot.df, aes(x=K, y=value, group=1)) + geom_line(size=1.1, color='tomato') + 
+      geom_point(size=1.1) + theme_bw() + labs(y='CV ACCs') + ggtitle(paste0(name, ' CV ACC')) +
+      scale_x_discrete(limits = plot.df$K) +
+      scale_y_continuous(breaks = seq(0,1, by=0.1), limits = c(0,1))
+  
+  plot.df <- data.frame(K=as.character(Ks), 
+                      value=rep(0, length(Ks)))
+  # Testing acc
+  plot.df$value <- sapply(plot.df$K, function(x) get(paste0(name, '.test'))[[as.character(x)]][['ACC']])
+  g2 <- ggplot(plot.df, aes(x=K, y=value, group=1)) + geom_line(size=1.1, color='skyblue') + 
+      geom_point(size=1.1) + theme_bw() + labs(y='Testing ACCs') +
+      scale_x_discrete(limits = plot.df$K) + ggtitle(paste0(name, ' testing ACC')) +
+      scale_y_continuous(breaks = seq(0,1, by=0.1), limits = c(0,1))
+  ggarrange(g1, g2, ncol=2, nrow=1)
+}
+
+draw.perf('mb')
+draw.perf('tcga')
+
+```
