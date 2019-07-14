@@ -125,13 +125,14 @@ tpm.res <- get(load("~/ktsp/new.data/TCGA_PAM50_histology_TumorPurity.rda"))
 table(final.assign, tpm.res$final_assign)
 
 brca.clin <- cbind.data.frame(data.frame(final_assign=final.assign),
-             clin2[ ,c('gender', 'race', 'ajcc_pathologic_tumor_stage', 'er_status_by_ihc', 
-                       'pr_status_by_ihc', 'her2_status_by_ihc', 'Histology_textCode')])
-colnames(brca.clin) <- c('final_assign', 'gender', 'race', 'ajcc_tumor_stage', 
+             clin2[ ,c('gender', 'race', 'ajcc_pathologic_tumor_stage', 'age_at_diagnosis',
+                       'er_status_by_ihc', 'pr_status_by_ihc', 'her2_status_by_ihc', 'Histology_textCode')])
+colnames(brca.clin) <- c('final_assign', 'gender', 'race', 'ajcc_tumor_stage', 'age_at_diagnosis',
                          'ER_status', 'PR_status', 'Her2_status', 'histology')
 
 brca.clin$ajcc_tumor_stage <- gsub('^Stage ', '', brca.clin$ajcc_tumor_stage)
 brca.clin$ajcc_tumor_stage <- gsub('[ABC]$', '', brca.clin$ajcc_tumor_stage)
+brca.clin$ajcc_tumor_stage <- factor(brca.clin$ajcc_tumor_stage)
 
 save(brca.clin, file='~/ktsp/data/BRCA.clin.Rdata')
 
