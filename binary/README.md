@@ -17,6 +17,18 @@ and were processed as stated in this [paper](https://www.nature.com/articles/s41
 2. Use feature counts after median ratio normalization and variance stabilizing transformation (vst) to redo PAM50 breast cancer subtypes assignment, 
 to see if the results are different from those using TPM data a lot.
 
+Comparison:
+
+
+|vst.assign| Basal | Her2 | LumA | LumB| Normal |
+|:--------:|:-----:|:----:|:----:|:---:|:------:|
+|__Basal__ |190    |0     |0     |0    |0       |
+|__Her2__  |0      |89    |0     |0    |0       |
+|__LumA__  |0      |1     |534   |6    |1       |
+|__LumB__  |0      |0     |0     |240  |0       |
+|__Normal__|0      |0     |0     |0    |34      |
+
+
 ###### Ref: [MLSeq manual](https://bioconductor.org/packages/release/bioc/vignettes/MLSeq/inst/doc/MLSeq.pdf)
 
 3. Use values processed above to apply ML, random forest first, doing cross validation and testing on independent MetaBric data. Then do it again reversely.
