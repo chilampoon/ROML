@@ -14,8 +14,7 @@ and were processed as stated in this [paper](https://www.nature.com/articles/s41
 ###### P.S. They select one primary tumoral sample from one patient only, thus the ids are all unique, I don't know why they did that.
 ###### Ref: [Alternative preprocessing of RNA-Sequencing data in The Cancer Genome Atlas leads to improved analysis results](https://academic.oup.com/bioinformatics/article/31/22/3666/240143)
 
-2. Use feature counts after median ratio normalization and variance stabilizing transformation (vst) to redo PAM50 breast cancer subtypes assignment, 
-to see if the results are different from those using TPM data a lot.
+2. Use feature counts after median ratio normalization and variance stabilizing transformation (vst) to redo PAM50 breast cancer subtypes assignment, to see if the results are different from those using TPM data a lot. __[DONE!]__
 
 Comparison:
 
