@@ -1,8 +1,16 @@
 # Function to generate psudo RNA-seq read counts
 # Modified from funciton sim.counts https://github.com/cran/ssizeRNA/blob/master/R/sim.counts.R
 
+# Steps:
+# 1. Mean counts: randomly sample from the mu from `lum.paras`
+# 2. Define the percentage of DE: 30% 
+# 3. Log fold change: Generate lfc from truncated normal distribution with mean 0, standard deviation 0.2 and truncated at 0.49/-0.49 (corresponding to at least 40% fold change) for DE genes
+# 4. Generate count data
+
+
 rseq.sim <- function(nGenes = 10000, pi0 = 0.8, m, mu, disp, fc, 
-                       up = 0.5, replace = TRUE) {
+                     up = 0.5, replace = TRUE) {
+  
   arg <- list(nGenes = nGenes,
               pi0 = pi0,
               group = rep(c(1, 2), each = m))
@@ -47,9 +55,9 @@ rseq.sim <- function(nGenes = 10000, pi0 = 0.8, m, mu, disp, fc,
     true_disps[h] <- disp[selected_genes[h]]
     
     lambda[h,] <- matrix(true_means[h], ncol = 1) %*% 
-      matrix(rep(1, 2 * m), nrow = 1) * 
-      cbind(matrix(rep(exp(delta[h]/2), m), ncol = m), # case
-            matrix(rep(exp(-delta[h]/2), m), ncol = m)) # control
+                  matrix(rep(1, 2 * m), nrow = 1) * 
+                  cbind(matrix(rep(exp(delta[h]/2), m), ncol = m), # case
+                        matrix(rep(exp(-delta[h]/2), m), ncol = m)) # control
     ## mean of counts
     
     phi[h,] <- matrix(rep(true_disps[h], 2 * m), ncol = 2 * m)
