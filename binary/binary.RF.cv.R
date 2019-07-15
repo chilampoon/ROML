@@ -34,7 +34,7 @@ rf.CV <- function(data.train, lb.train) {
     results.list[[i]][['ConfusionMatrix']] <- cm
     results.list[[i]][['ACC']] <- as.numeric(cm$overall['Accuracy'])
     results.list[[i]][['Youden']] <- youden
-    results.list[[i]][['AUC']] <- auc(roc(response=cv.valid.labels, predictor=as.vector(predictionScores[ ,1]), quiet = T))
+    results.list[[i]][['AUC']] <- auc(roc(response=as.vector(cv.valid.labels), predictor=as.vector(predictionScores[ ,1]), quiet = T))
     results.list[[i]][['model']] <- rf.model
     print(paste0("Fold ", i, "-ACC:", round(results.list[[i]][['ACC']], 3)))
   }
