@@ -3,11 +3,6 @@
 
 ## Real Data
 
-### Myths on units of expression values
-
-
-
-
 ### Data description and preprocession
 
 _Maybe adding more datasets afterwards._
