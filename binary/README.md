@@ -61,7 +61,7 @@ Workflow:
 
 1. Low mean filtered out 50% genes
 2. Randomly select 5k genes (0.5k DE + 4.5k nDE or 1k DE + 4k nonDE)
-3. Simulate their means and sd using values from seed
+3. Simulate their means and sd using values from seed - temporarily follow normal distribution
 
 Note that the genes must be concording between TCGA & MetaBric
 
