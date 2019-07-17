@@ -2,6 +2,12 @@
 
 
 ## Real Data
+
+### Myths on units of expression values
+
+
+
+
 ### Data description and preprocession
 
 _Maybe adding more datasets afterwards._
@@ -35,7 +41,14 @@ For binary classification, LumA and LumB balanced samples were selected.
     - Baseline model: DE analysis to identify DEGs, then do ML procedures
     - ROML: kTSP + a ML model
     - Compare performances, choose the better one as seeds of simulation
-    
+   
+---
+
+_Update: After considering about the unit issues a lot, I think it's better to use tpm values to do baseline & ROML, since I don't have enough information and it's too much work to start from the very beginning like BAM files or fastq._
+
+
+   
+
 #### MetaBric microarray
 
 1. Data were downloaded from Synapse sofware platform (syn1688369) and preprocessed as mentioned above.
@@ -46,6 +59,20 @@ For binary classification, LumA and LumB balanced samples were selected.
 ---
 
 ## Simulation
+
+Seed: TCGA & MetaBric balanced LumA & LumB data
+
+Workflow:
+
+1. Low mean filtered out 50% genes
+2. Randomly select 5k genes (0.5k DE + 4.5k nDE or 1k DE + 4k nonDE)
+3. Simulate their means and sd using values from seed
+
+Note that the genes must be concording between TCGA & MetaBric
+
+
+
+
 
 ### Generate RNA-seq read counts
 
