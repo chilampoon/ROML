@@ -1,80 +1,77 @@
 # Binary classification analysis
 
+## 1. Simulation
 
-## Real Data
+> __GOAL__: To prove our expectation: ROML predicts better - more accurate and more stable - when inter-study heterogeneity  increases
 
-### Data description and preprocession
+### Data Generation
+
+1. Subsample balanced samples of LumA & LumB subtypes from TCGA BRCA and MetaBric data
+2. Differential expression analysis for MetaBric suσbdataset by limma-trend
+3. Set the DE percentage `pDE`
+3. Values in training data sample from N(μ, σ) - μ, σ are the means and variances of genes in the MetaBric data; DEG and non-DEG values are generated respectively in two groups
+4. Same as step 3, values in testing are based on BRCA data
+
+
+### Balanced dataset
+
+- Number of gene: 5000
+- Number of training sample: 200 (group1) + 200 (group2)
+- Number of testing sample: 200 (group1) + 200 (group2)
+- Percentage of DEG: 10%, 30%
+
+Compare accuracy (ACC) and Youden index of random forest (RF), ktsp + random forest (tspRF/ROML) and [ktsp](https://academic.oup.com/bioinformatics/article/31/2/273/2365798) methods.
+
+
+### Imbalanced dataset
+
+Just wait and see if it's worth exploring.
+
+
+
+## 2. Real Data
+
+### Data description 
 
 _Maybe adding more datasets afterwards._
 
-#### TCGA BRCA RNA-seq
+#### 1. TCGA BRCA RNA-seq
 
-1. Data were download from GEO [GSE62944](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE62944), 
-and were processed as stated in this [paper](https://www.nature.com/articles/s41598-018-25357-0).
+- Data were download from GEO [GSE62944](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE62944), data preprocession and BRCA PAM50 prediction see this [paper](https://www.nature.com/articles/s41598-018-25357-0)
 
 ###### P.S. They select one primary tumoral sample from one patient only, thus the ids are all unique, I don't know why they did that.
-###### Ref: [Alternative preprocessing of RNA-Sequencing data in The Cancer Genome Atlas leads to improved analysis results](https://academic.oup.com/bioinformatics/article/31/22/3666/240143)
 
-2. Use feature counts after median ratio normalization and variance stabilizing transformation (vst) to redo PAM50 breast cancer subtypes assignment, to see if the results are different from those using TPM data a lot. __[DONE!]__
+#### 2. MetaBric microarray
 
-Comparison:
-
-
-|vst.assign| Basal | Her2 | LumA | LumB| Normal |
-|:--------:|:-----:|:----:|:----:|:---:|:------:|
-|__Basal__ |190    |0     |0     |0    |0       |
-|__Her2__  |0      |89    |0     |0    |0       |
-|__LumA__  |0      |1     |534   |6    |1       |
-|__LumB__  |0      |0     |0     |240  |0       |
-|__Normal__|0      |0     |0     |0    |34      |
-
-
-###### Ref: [MLSeq manual](https://bioconductor.org/packages/release/bioc/vignettes/MLSeq/inst/doc/MLSeq.pdf)
-
-3. Use values processed above to apply ML, random forest first, doing cross validation and testing on independent MetaBric data. Then do it again reversely.
-For binary classification, LumA and LumB balanced samples were selected.
-    - Baseline model: DE analysis to identify DEGs, then do ML procedures
-    - ROML: kTSP + a ML model
-    - Compare performances, choose the better one as seeds of simulation
-   
----
+- Data were downloaded from Synapse sofware platform (syn1688369) and preprocessed as mentioned above.
 
 _Update: After considering about the unit issues a lot, I think it's better to use tpm values to do baseline & ROML, since I don't have enough information and it's too much work to start from the very beginning like BAM files or fastq._
 
 
-   
+### Pipeline
 
-#### MetaBric microarray
+We tried both directions for prediction, i.e. `TCGA -> MB` & `MB -> TCGA`
 
-1. Data were downloaded from Synapse sofware platform (syn1688369) and preprocessed as mentioned above.
-2. Same step as that in TCGA.
-3. Same step as that in TCGA.
+#### ROML
 
-
----
-
-## Simulation
-
-Seed: TCGA & MetaBric balanced LumA & LumB data
-
-Workflow:
-
-1. Low mean filtered out 50% genes
-2. Randomly select 5k genes (0.5k DE + 4.5k nDE or 1k DE + 4k nonDE)
-3. Simulate their means and sd using values from seed - temporarily follow normal distribution
-
-Note that the genes must be concording between TCGA & MetaBric
+- Filter out 50% (or 25%) genes with relative low expression using mean ranks
+- Log-transformed TPM values from RNA-seq and fluorescent intensities from microarray are used to calculate tsp score
+- The ranks of top gene pairs are transformed into 0-1 binary values and inputed into the following machine learning algorithm
 
 
+#### Baseline
 
+- Filter out 50% (or 25%) genes with relative low expression using mean ranks
+- Log-transformed TPM values from RNA-seq and fluorescent intensities from microarray are used to conduct differential expression analysis
+- Features are selected based on several thresholds of adjusted P-value and log fold change in the result of DEA
+- Perform cross-platform normalization (at least 3 various methods): ----> TO DO!
+- Go through machine learning procedure with selected features
 
-
-### Generate RNA-seq read counts
-
-
-
-### Generate microarray values
+### kTSP
+--------> TO DO!
+- 
 
 
 
 
+  
