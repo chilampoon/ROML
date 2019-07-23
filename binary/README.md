@@ -79,7 +79,7 @@ We tried both directions for prediction, i.e. `TCGA -> MB` & `MB -> TCGA`
 
 7/22 To do:
 
-1. Read papers about __cross-platform normalization__, summarize into my wiki page, then include 3 typical ones in my analysis
+1. Read papers about __cross-platform normalization__, summarize into my wiki page, then include 3 typical ones in my analysis (before 7/22~23 midnight)
 2. Figure out how to improve binary real data steps
 3. Add kTSP for comparison
 4. Finish prelimary binary part! (by the end of this week 7/28)
