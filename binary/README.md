@@ -15,10 +15,13 @@
 
 ### Balanced dataset
 
-- Number of gene: 5000
-- Number of training sample: 200 (group1) + 200 (group2)
-- Number of testing sample: 200 (group1) + 200 (group2)
-- Percentage of DEG: 10%, 30%
+|             |Training|Testing|
+|:-----------:|:------:|:-----:|
+|No. of gene  |5000    |5000   |
+|No. of sample|200+200 |200+200|
+|DEG%         |10%, 30%|10%, 30%|
+
+
 
 Compare accuracy (ACC) and Youden index of random forest (RF), ktsp + random forest (tspRF/ROML) and [ktsp](https://academic.oup.com/bioinformatics/article/31/2/273/2365798) methods.
 
