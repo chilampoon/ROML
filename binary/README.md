@@ -1,6 +1,6 @@
 # Binary classification analysis
 
-## 1. Simulation
+## 1. Simulation Data
 
 > __GOAL__: To prove our expectation: ROML predicts better - more accurate and more stable - when inter-study heterogeneity  increases
 
@@ -19,7 +19,7 @@
 |:-----------:|:------:|:-----:|
 |No. of gene  |5000    |5000   |
 |No. of sample|200+200 |200+200|
-|DEG%         |10%, 30%|10%, 30%|
+|DEG%         |10% |10%|
 
 
 
@@ -28,7 +28,7 @@ Compare accuracy (ACC) and Youden index of random forest (RF), ktsp + random for
 
 ### Imbalanced dataset
 
-Just wait and see if it's worth exploring.
+ROML is worse than baseline while the imbalanced ratio increases.
 
 
 
@@ -51,24 +51,43 @@ _Maybe adding more datasets afterwards._
 _Update: After considering about the unit issues a lot, I think it's better to use tpm values to do baseline & ROML, since I don't have enough information and it's too much work to start from the very beginning like BAM files or fastq._
 
 
-### Pipeline
+## 3. Pipeline
 
 We tried both directions for prediction, i.e. `TCGA -> MB` & `MB -> TCGA`
 
 #### ROML
 
-- Filter out 50% (or 25%) genes with relative low expression using mean ranks
+- Filter out 25% genes with relative low expression using mean ranks
 - Log-transformed TPM values from RNA-seq and fluorescent intensities from microarray are used to calculate tsp score
-- The ranks of top gene pairs are transformed into 0-1 binary values and inputed into the following machine learning algorithm
-
+- The ranks of top gene pairs are transformed into 0-1 binary values as features of models (hugh computational cost)
+- Go through machine learning procedure with selected features
+    - 5-fold cross-validation (repeat 10 times)
+    - Select the best feature set (=best k)
+    - Train a model using all training data
+    - Test on the independent testing set
 
 #### Baseline
 
-- Filter out 50% (or 25%) genes with relative low expression using mean ranks
+Data: 
+
+|             |TCGA|MetaBric|TCGA|MetaBric|
+|:-----------:|:---|:---:|:---:|:---:|
+|             |Balanced |Balanced|Imbalanced|Imbalanced|
+|No. of LumA  |246 | 490 | 534 | 719 |
+|No. of LumB  |246 | 490 | 246 | 490 |
+
+
+
+- Filter out 25% genes with relative low expression using mean ranks
 - Log-transformed TPM values from RNA-seq and fluorescent intensities from microarray are used to conduct differential expression analysis
 - Features are selected based on several thresholds of adjusted P-value and log fold change in the result of DEA
-- Perform cross-platform normalization (at least 3 various methods): ----> TO DO!
+- Perform cross-platform normalization (at least 3 various methods): QN, FSQN, TDM
 - Go through machine learning procedure with selected features
+    - 5-fold cross-validation (repeat 10 times)
+    - Select the best feature set
+    - Train a model using all training data
+    - Test on the independent testing set
+
 
 ### kTSP
 --------> TO DO!
@@ -79,9 +98,7 @@ We tried both directions for prediction, i.e. `TCGA -> MB` & `MB -> TCGA`
 
 7/22 To do:
 
-1. Read papers about __cross-platform normalization__, summarize into my wiki page, then include 3 typical ones in my analysis (before 7/22~23 midnight)
-2. Figure out how to improve binary real data steps
-3. Add kTSP for comparison
+3. Add kTSP for comparison (?)
 4. Finish prelimary binary part! (by the end of this week 7/28)
 
 
