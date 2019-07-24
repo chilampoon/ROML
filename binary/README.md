@@ -7,11 +7,11 @@
 ### Data Generation
 
 1. Subsample balanced samples of LumA & LumB subtypes from TCGA BRCA and MetaBric data
-2. Differential expression analysis for MetaBric suσbdataset by limma-trend
-3. Set the DE percentage `pDE`
+2. Differential expression analysis for MetaBric subdataset by limma-trend to determine DEG & non-DEG
+3. Set the DE percentage `pDE = 0.1`
 3. Values in training data sample from N(μ, σ) - μ, σ are the means and variances of genes in the MetaBric data; DEG and non-DEG values are generated respectively in two groups
 4. Same as step 3, values in testing are based on BRCA data
-
+5. Add noise on testing data by `addNoise()` function in sdcMicro R package
 
 ### Balanced dataset
 
@@ -19,7 +19,7 @@
 |:-----------:|:------:|:-----:|
 |No. of gene  |5000    |5000   |
 |No. of sample|200+200 |200+200|
-|DEG%         |10% |10%|
+|DEG%         |  10%   |  10%  |
 
 
 
@@ -28,7 +28,7 @@ Compare accuracy (ACC) and Youden index of random forest (RF), ktsp + random for
 
 ### Imbalanced dataset
 
-ROML is worse than baseline while the imbalanced ratio increases.
+ROML is worse than baseline while the imbalanced ratio increases. WHY??
 
 
 
@@ -36,7 +36,7 @@ ROML is worse than baseline while the imbalanced ratio increases.
 
 ### Data description 
 
-_Maybe adding more datasets afterwards._
+_Maybe adding more datasets afterwards._ -> CRC from TCGA and KFSYSCC
 
 #### 1. TCGA BRCA RNA-seq
 
