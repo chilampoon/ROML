@@ -23,6 +23,8 @@ There are two main parts of it:
 CRC:
 TCGA RNA-seq
 
+TPM data from ARCHS4: https://amp.pharm.mssm.edu/archs4/download.html
+
 Does RSEM normalized data correct for gene length already?
 
 KFSYSCC:
