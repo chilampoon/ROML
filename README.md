@@ -20,5 +20,11 @@ There are two main parts of it:
 
 ## Real data application
 
+CRC:
+TCGA RNA-seq
 
+Does RSEM normalized data correct for gene length already?
+
+KFSYSCC:
+https://www.synapse.org/#!Synapse:syn4974668
 
