@@ -71,11 +71,16 @@ We tried both directions for prediction, i.e. `TCGA -> MB` & `MB -> TCGA`
 Data: 
 
 |             |TCGA|MetaBric|TCGA|MetaBric|
-|:-----------:|:---|:---:|:---:|:---:|
+|:-----------:|:---:|:---:|:---:|:---:|
 |             |Balanced |Balanced|Imbalanced|Imbalanced|
 |No. of LumA  |246 | 490 | 534 | 719 |
 |No. of LumB  |246 | 490 | 246 | 490 |
 
+
+|             |TCGA|KFSYSCC|
+|:-----------:|:---:|:---:|
+|No. of CMS2  |154 | 110 |
+|No. of CMS4  |108 | 85 | 
 
 
 - Filter out 25% genes with relative low expression using mean ranks
