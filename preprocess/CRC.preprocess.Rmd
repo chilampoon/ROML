@@ -1,0 +1,159 @@
+---
+title: "CRC data preprocess"
+author: "Poon Chi Lam"
+date: "8/10/2019"
+output: html_document
+---
+
+- TCGA CRC RNA-seq TPM values are downloaded from [GSE62944](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE62944).
+
+- KFSYSCC microarray data are downloaded from [synapse syn4974668](https://www.synapse.org/#!Synapse:syn4974668).
+
+
+- The CMS molecular subtypes were all downloaded from [synapse syn4978511](https://www.synapse.org/#!Synapse:syn4978511).
+
+
+```{R setup}
+source('~/ktsp/script/function/plot.utils.R')
+```
+
+## TCGA COAD
+### Load data and extract
+```{R, eval=F}
+sample <- read.delim('~/ktsp/new.data/GSE62944_06_01_15_TCGA_24_CancerType_Samples.txt', header = F)
+coad.id <- as.character(sample[sample$V2 == 'COAD',]$V1)
+length(coad.id)
+
+total.expr <- read.delim('~/ktsp/new.data/GSM1536837_06_01_15_TCGA_24.tumor_Rsubread_TPM.txt', check.names = F)
+rownames(total.expr) <- total.expr[,1]
+coad.expr <- total.expr[,match(coad.id, colnames(total.expr))]
+save(coad.expr, file='~/ktsp/new.data/tcga.coad.expr.Rdata')
+```
+
+
+```{R, eval=F}
+load('~/ktsp/new.data/tcga.coad.expr.Rdata')
+
+clin <- read.delim('~/ktsp/new.data/GSE62944_06_01_15_TCGA_24_548_Clinical_Variables_9264_Samples.txt', header = F)
+coad.clin <- as.data.frame(t(clin))
+coad.clin <- coad.clin[-c(2:3),]
+colnames(coad.clin) <- unlist(coad.clin[1,])
+rownames(coad.clin) <- unlist(coad.clin[,1])
+coad.clin <- coad.clin[-1,-1]
+coad.clin <- coad.clin[match(colnames(coad.expr), rownames(coad.clin)),]
+coad.clin <- coad.clin[ ,c("bcr_patient_barcode", "gender", "race", "clinical_stage", "ajcc_pathologic_tumor_stage", "age_at_initial_pathologic_diagnosis")]
+coad.clin$bcr_patient_barcode <- gsub('-...-...-....-..$', '', rownames(coad.clin))
+```
+
+
+### Load and match CMS subtypes
+```{R, eval=F}
+all.cms <- read.delim('~/ktsp/new.data/cms_labels_public_all.txt')
+coad.label <- all.cms[all.cms$dataset=='tcga',]
+coad.clin$cms_label <- rep(NA, nrow(coad.clin))
+for (i in 1:nrow(coad.clin)) {
+  name <- coad.clin$bcr_patient_barcode[i]
+  if (name %in% coad.label$sample) {
+    coad.clin$cms_label[i] <- as.character(coad.label[coad.label$sample==name,]$CMS_final_network_plus_RFclassifier_in_nonconsensus_samples)
+  }
+}
+table(coad.clin$cms_label)
+coad.clin <- coad.clin[coad.clin$cms_label %in% c('CMS1', 'CMS2', 'CMS3', 'CMS4'),]
+coad.expr <- coad.expr[,match(rownames(coad.clin), colnames(coad.expr))]
+```
+
+
+## KFSYSCC
+```{R, eval=F}
+kf.expr <- read.table(file='~/ktsp/new.data/KFSYSCC_expression.tsv', header = T, row.names = 1)
+colnames(kf.expr) <- gsub('.CEL$', '', colnames(kf.expr))
+```
+
+
+### Annotate KFSYSCC probes
+
+The probe ids in this dataset are those in Affymetrix Human Genome U133 Plus 2.0 Array, I download the GPL570 file from [GEO](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GPL570).
+
+```{R, eval=F}
+map <- read.delim('~/ktsp/new.data/GPL570-55999.txt', header=T, comment.char='#')
+map <- map[map$Gene.Symbol != '', ]
+map <- map[,c('ID', 'Gene.Symbol')]
+kf.expr <- kf.expr[which(rownames(kf.expr) %in% map$ID),]
+
+map$Gene.Symbol <- gsub(' /// .*$', '',map$Gene.Symbol)
+kf.expr$symbol <- rownames(kf.expr)
+kf.expr$symbol <- sapply(kf.expr$symbol, function(x) as.character(map[map$ID == x, ]$Gene.Symbol))
+kf.expr <- kf.expr[which(kf.expr$symbol %in% rownames(coad.expr)),]
+all(kf.expr$symbol %in% rownames(coad.expr))
+
+IQR2 <- function(sub) {
+  if (length(sub) == 1) {
+    return (sub)
+  } else {
+    name <- as.character(unique(sub[,'symbol']))
+    sub <- sub[, which(colnames(sub) != 'symbol')]
+    iqrScore <- apply(sub, 1, IQR)
+    return (cbind(name, sub[which.max(iqrScore), ]))
+   }
+}
+
+gene.split <- split(1:nrow(kf.expr), kf.expr$symbol)
+filt.exp <- lapply(gene.split, function(x) IQR2(kf.expr[x, ]))
+tmp <- do.call(rbind, filt.exp)
+kf.filt <- tmp[ ,-1]
+```
+
+
+### Match KFSYSCC CMS subtypes
+```{R, eval=F}
+kf.clin <- data.frame(id=colnames(kf.filt), cms_label=rep(NA, ncol(kf.filt)))
+all.cms$CMS_final_network_plus_RFclassifier_in_nonconsensus_samples <- as.character(all.cms$CMS_final_network_plus_RFclassifier_in_nonconsensus_samples)
+
+kf.clin$cms_label <- sapply(as.character(kf.clin$id), function(x) all.cms[all.cms$sample==x,]$CMS_final_network_plus_RFclassifier_in_nonconsensus_samples)
+table(kf.clin$cms_label)
+
+kf.clin <- kf.clin[kf.clin$cms_label != 'NOLBL',]
+kf.expr <- kf.filt[,match(kf.clin$id, colnames(kf.filt))]
+
+coad.expr <- coad.expr[match(rownames(kf.expr), rownames(coad.expr)),]
+all(rownames(coad.expr)==rownames(kf.expr))
+dim(coad.expr); dim(kf.expr)
+
+coad.expr <- log2(coad.expr + 1)
+rownames(coad.expr) <- gsub('-', '_', rownames(coad.expr))
+rownames(kf.expr) <- gsub('-', '_', rownames(kf.expr))
+
+save(coad.expr, coad.clin, file='~/ktsp/CRC/TCGA.COAD.Rdata')
+save(kf.expr, kf.clin, file='~/ktsp/CRC/kfsyscc.CRC.Rdata')
+```
+
+
+
+### Cohort demography
+```{R}
+load('~/ktsp/CRC/TCGA.COAD.Rdata')
+load('~/ktsp/CRC/kfsyscc.CRC.Rdata')
+
+st.count1 <- coad.clin %>% group_by(cms_label) %>% summarise(counts = n())
+st.count1 <- as.data.frame(st.count1 %>% mutate(data = rep("TCGA-COAD", nrow(st.count1))))
+st.count2 <- kf.clin %>% group_by(cms_label) %>% summarise(counts = n())
+st.count2 <- as.data.frame(st.count2 %>% mutate(data = rep("KFSYSCC", nrow(st.count2))))
+colnames(st.count2) <- colnames(st.count1)
+st.count <- rbind.data.frame(st.count1, st.count2)
+
+ggplot(st.count, aes(x = cms_label, y = counts, fill = data)) +
+  geom_bar(stat = "identity", color='black', position=position_dodge()) +
+  geom_text(aes(cms_label, counts, label = counts), position=position_dodge(width = 1), vjust = -0.2) +
+  scale_y_continuous(limits=c(0, 200)) + 
+  theme_bw() +
+  labs(title="Sample numbers in each subtype", x="", y="", fill="Data") + 
+  scale_fill_manual(values = c('seashell1', 'lightcyan3'))
+```
+
+
+### Density overview
+```{R, fig.width=14}
+par(mfrow=c(1, 2), las=1)
+dens.plot(coad.expr, getColors(ncol(coad.expr)), c(0, 0.5))
+dens.plot(kf.expr, getColors(ncol(kf.expr)), c(0, 0.5))
+```

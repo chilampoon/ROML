@@ -1,0 +1,192 @@
+---
+title: "BRCA & MetaBric data procession"
+author: "Poon Chi Lam"
+date: "7/24/2019"
+output: html_document
+---
+  
+  
+```{R setup}
+suppressPackageStartupMessages({
+  library(RColorBrewer)
+  library(tidyr)
+  library(dplyr)
+  library(reshape2)
+  library(DESeq2)
+  library(ggplot2)
+  library(stringr)
+})
+```
+
+
+# Download and preprocess
+
+The following files are downloaded from box shared by Li Zhu, the original TCGA data is from GEO GSE62944 repo. MetaBric data is from??
+
+- `brcaTCGAtpm_log2_uniquePrimaries.rda`: It is the tpm matrix, the output of `Rsubread` package.
+- `tcgaClinical_10_14_15_Processed.rda`
+- `TCGA_PAM50_histology_TumorPurity.rda`: results from PAM50 classifier in `genefu` package
+- `Complete_METABRIC_Clinical_Features_Data.rbin`
+- `MetaBric_processed_Li.rdata`
+
+## TCGA BRCA
+```{R}
+data.dir <- '~/ktsp/data'
+brca.tpm <- get(load(file.path(data.dir, "brcaTCGAtpm_log2_uniquePrimaries.rda")))
+brca.clin <- get(load(file.path(data.dir, "tcgaClinical_10_14_15_Processed.rda")))
+rm(brcaTCGAtpm_log2_primaries_unique); rm(tcga_clinical_10_14_15)
+brca.clin <- brca.clin[match(colnames(brca.tpm), rownames(brca.clin)), ]
+all(colnames(brca.tpm) == rownames(brca.clin))
+
+
+# Combine PAM50 assign & other clinic data
+load(file.path(data.dir, "TCGA_PAM50_histology_TumorPurity.rda"))
+TCGA_PAM50 <- TCGA_PAM50[match(rownames(brca.clin), rownames(TCGA_PAM50)),]
+brca.clin <- cbind.data.frame(TCGA_PAM50,
+             brca.clin[ ,c('pr_status_by_ihc', 'gender', 'race', 'ajcc_pathologic_tumor_stage', 'age_at_diagnosis')])
+colnames(brca.clin) <- c('final_assign', 'histology', 'tumor_purity_CPE', 'ER_status', 'Her2_status', 'PR_status', 'gender', 'race', 'ajcc_tumor_stage', 'age_at_diagnosis')
+
+# Process stage names
+brca.clin$ajcc_tumor_stage <- gsub('^Stage ', '', brca.clin$ajcc_tumor_stage)
+brca.clin$ajcc_tumor_stage <- gsub('[ABC]$', '', brca.clin$ajcc_tumor_stage)
+brca.clin$ajcc_tumor_stage <- factor(brca.clin$ajcc_tumor_stage)
+
+save(brca.clin, file=file.path(data.dir, 'BRCA.clin.Rdata'))
+```
+
+
+## MetaBric
+```{R mb}
+# Load 
+mb.clin <- get(load(file.path(data.dir, 'Complete_METABRIC_Clinical_Features_Data.rbin')))
+mb.expr <- get(load(file.path(data.dir, "MetaBric_processed_Li.rdata")))
+rm(Complete_METABRIC_Clinical_Features_Data, MetaBric)
+all(rownames(mb.clin)==colnames(mb.expr))
+
+mb.clin <- mb.clin[ ,c('NOT_IN_OSLOVAL_Pam50Subtype', 'grade', 
+                       'age_at_diagnosis', 'ER.Expr', 'PR.Expr', 'Her2.Expr')]
+colnames(mb.clin)[1] <- 'Pam50Subtype'
+table(mb.clin$Pam50Subtype)
+
+
+# Remove NC MB samples
+mb.clin <- mb.clin[mb.clin$Pam50Subtype != 'NC',]
+mb.expr <- mb.expr[ ,match(rownames(mb.clin), colnames(mb.expr))]
+mb.clin$Pam50Subtype <- factor(mb.clin$Pam50Subtype)
+
+# Intersect common genes of two datasets
+common.gene <- intersect(rownames(brca.tpm), rownames(mb.expr))
+length(common.gene)
+
+brca.expr <- brca.tpm[match(common.gene, rownames(brca.tpm)), ]
+mb.expr <- mb.expr[match(common.gene, rownames(mb.expr)), ]
+all(rownames(brca.expr)==rownames(mb.expr))
+dim(brca.expr);dim(mb.expr)
+
+brca.expr <- as.data.frame(brca.expr)
+mb.expr <- as.data.frame(mb.expr)
+rownames(brca.expr) <- gsub('-', '_', rownames(brca.expr))
+rownames(mb.expr) <- gsub('-', '_', rownames(mb.expr))
+
+
+save(mb.clin, file=file.path(data.dir, 'MB.clin.Rdata'))
+save(mb.expr, file=file.path(data.dir, 'MB.intersect.expr.Rdata'))
+save(brca.expr, file=file.path(data.dir, 'BRCA.intersect.expr.Rdata'))
+```
+
+
+# Cohort demography
+```{R}
+st.count1 <- brca.clin %>% group_by(final_assign) %>% summarise(counts = n())
+st.count1 <- as.data.frame(st.count1 %>% mutate(data = rep("TCGA", nrow(st.count1))))
+st.count2 <- mb.clin %>% group_by(Pam50Subtype) %>% summarise(counts = n())
+st.count2 <- as.data.frame(st.count2 %>% mutate(data = rep("MetaBric", nrow(st.count2))))
+colnames(st.count2) <- colnames(st.count1)
+st.count <- rbind.data.frame(st.count1, st.count2)
+
+ggplot(st.count, aes(x = final_assign, y = counts, fill = data)) +
+  geom_bar(stat = "identity", color='black', position=position_dodge()) +
+  geom_text(aes(final_assign, counts, label = counts), position=position_dodge(width = 1), vjust = -0.2) +
+  scale_y_continuous(limits=c(0, 800)) + 
+  theme_bw() +
+  labs(title="Sample numbers in each subtype", x="", y="", fill="Data") + 
+  scale_fill_manual(values = c('seashell1', 'lightcyan3'))
+```
+
+
+### Distribution of expression values
+```{R, eval=T, fig.width=12}
+source('~/ktsp/script/function/plot.utils.R')
+
+par(mfrow=c(1, 2), las=1)
+dens.plot(brca.expr, getColors(ncol(brca.expr)), c(0, 0.6))
+dens.plot(mb.expr, getColors(ncol(mb.expr)), c(0, 0.6))
+```
+
+
+
+
+## Subsample data
+### Binary
+
+For binary analysis, LumA and LumB samples are selected.
+```{R subsample}
+bi.brca.clin <- brca.clin[brca.clin$final_assign %in% c('LumA', 'LumB'),]
+bi.brca.expr <- brca.expr[ ,match(rownames(brca.clin), colnames(brca.expr))]
+bi.mb.clin <- mb.clin[mb.clin$Pam50Subtype %in% c('LumA', 'LumB'),]
+bi.mb.expr <- mb.expr[ ,match(rownames(mb.clin), colnames(mb.expr))]
+
+bi.brca.clin$final_assign <- factor(bi.brca.clin$final_assign)
+bi.mb.clin$Pam50Subtype <- factor(bi.mb.clin$Pam50Subtype)
+table(bi.mb.clin$final_assign); table(bi.mb.clin$Pam50Subtype)
+
+# Save the data for downstream analysis - imbalanced binary data
+save(bi.brca.expr, bi.brca.clin, file=file.path(data.dir, 'binary/realdata/imbalanced/TCGA.imbalance.LumAB.Rdata'))
+save(bi.mb.expr, bi.mb.clin, file=file.path(data.dir, 'binary/realdata/imbalanced/MB.imbalance.LumAB.Rdata'))
+
+# TCGA
+set.seed(1357)
+lumA.id <- rownames(brca.clin[brca.clin$final_assign=='LumA',])
+lumB.id <- rownames(brca.clin[brca.clin$final_assign=='LumB',])
+sub.lumA.id <- sample(lumA.id, length(lumB.id), replace=F)
+
+brca.expr.sub <- brca.expr[ ,match(c(sub.lumA.id, lumB.id), colnames(brca.expr))]
+brca.clin.sub <- brca.clin[match(c(sub.lumA.id, lumB.id), rownames(brca.clin)), ]
+
+
+# MetaBric
+set.seed(2468)
+LumA.id <- rownames(mb.clin[mb.clin$Pam50Subtype=='LumA', ])
+LumB.id <- rownames(mb.clin[mb.clin$Pam50Subtype=='LumB', ])
+sub.LumA.id <- sample(LumA.id, length(LumB.id), replace=F)
+
+mb.expr.sub <- mb.expr[ ,match(c(sub.LumA.id, LumB.id), colnames(mb.expr))]
+mb.clin.sub <- mb.clin[match(c(sub.LumA.id, LumB.id), rownames(mb.clin)), ]
+dim(brca.expr.sub); dim(mb.expr.sub)
+
+# Save the data for downstream analysis - balanced binary data
+save(brca.expr.sub, brca.clin.sub, file=file.path(data.dir, 'binary/realdata/balanced/TCGA.balance.LumAB.Rdata'))
+save(mb.expr.sub, mb.clin.sub, file=file.path(data.dir, 'binary/realdata/balanced/MB.balance.LumAB.Rdata'))
+```
+
+
+### Multi-class
+#### Imbalanced sample
+
+Since the normal-like samples in TCGA are not too many, they were excluded in the studies.
+```{R}
+# TCGA
+mul.brca.clin <- brca.clin[brca.clin$final_assign != 'Normal', ]
+mul.brca.clin$final_assign <- factor(mul.brca.clin$final_assign)
+mul.brca.expr <- brca.expr[ ,match(rownames(mul.brca.clin), colnames(brca.expr))]
+
+# Metabric
+mul.mb.clin <- mb.clin[mb.clin$Pam50Subtype != 'Normal',]
+mul.mb.clin$Pam50Subtype <- factor(mul.mb.clin$Pam50Subtype)
+mul.mb.expr <- mb.expr[ ,match(rownames(mul.mb.clin), colnames(mb.expr))]
+
+save(mul.brca.clin, mul.brca.expr, file = '~/ktsp/data/multiclass/realdata/BRCA.multi.Rdata')
+save(mul.mb.clin, mul.mb.expr, file = '~/ktsp/data/multiclass/realdata/MB.multi.Rdata')
+```
+
+
