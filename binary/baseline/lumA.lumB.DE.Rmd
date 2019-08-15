@@ -1,0 +1,161 @@
+---
+title: "Balanced LumA vs LumB - DEA"
+author: "Poon Chi Lam"
+date: "7/24/2019"
+output: html_document
+---
+
+- Datasets: TCGA BRCA RNA-seq and MetaBric microarray
+- Filtering: 30% low-mean genes out
+- Feature type: expression values
+- Feature selection: differential expression analysis using limma
+- Normalization: quantile normalization
+
+One as training data and the other as testing, that is doing twice.
+
+```{R setup}
+suppressPackageStartupMessages({
+  library(tidyr)
+  library(dplyr)
+  library(reshape2)
+  library(limma)
+  library(DESeq2)
+  library(edgeR)
+  library(ggplot2)
+  library(pheatmap)
+  library(stringr)
+})
+source('~/ktsp/script/function/lowMeans.filter.R')
+```
+
+
+## Load data
+```{R load}
+data.dir <- '~/ktsp/data/binary/realdata/balanced'
+load(file.path(data.dir, "TCGA.balance.LumAB.Rdata"))
+load(file.path(data.dir, "MB.balance.LumAB.Rdata"))
+```
+
+
+## TCGA data
+### Filter low mean genes
+```{R lowmean}
+gene.remain <- lowMeans.filter(brca.expr.sub, 70)
+brca.data <- brca.expr.sub[match(gene.remain, rownames(brca.expr.sub)), ]
+```
+
+
+### DE analysis - TCGA
+Use **limma-trend** here, the mean-variance relationship is modelled with an empirical Bayes prior trend, concording with those used in microarrary, since the library sizes in TCGA samples are usually consistent and I am using `TPM` values.
+
+
+```{R dea}
+# Construct design matrix
+type <- factor(brca.clin.sub$final_assign)
+# stage <- factor(brca.clin.sub$ajcc_tumor_stage)
+# age <- as.numeric(brca.clin.sub$age_at_diagnosis)
+
+design <- model.matrix(~ type)
+head(design, 5)
+type1 <- 'typeLumB'
+
+# fitting
+vfit <- lmFit(brca.data, design)
+efit <- eBayes(vfit, trend = T)
+plotSA(efit, main="Final model: Mean-variance trend")
+
+# Top table
+tt.brca <- topTable(efit, number = Inf, coef = type1)
+head(tt.brca, 10)
+
+# Volcano & MA plot
+limma::volcanoplot(efit, coef = type1, highlight = 2, names = rownames(efit))
+limma::plotMA(efit, coef = type1, main = "TCGA LumA vs LumB")
+
+# Significant gene numbers
+nrow(tt.brca[(tt.brca$adj.P.Val < 0.01),])
+nrow(tt.brca[(tt.brca$adj.P.Val < 0.01) & (abs(tt.brca$logFC) > log2(1.45)), ])
+1270/13651
+```
+
+### Heatmap
+```{R heatmap}
+draw_heatmap <- function(matrix, topTable, phenoDF, list) {
+  matrix <- matrix[list,]
+  hm_cdr <- phenoDF %>% select(final_assign)
+  rownames(hm_cdr) <- colnames(matrix)
+  colnames(hm_cdr)  <- c('type')
+  type <- c("#99a599", "#37637f")
+  names(type) <- unique(hm_cdr$type)
+  anno_colors <- list(type = type)
+  h <- pheatmap(matrix, annotation_col=hm_cdr, annotation_colors=anno_colors, 
+                labels_row = list, show_colnames = F)
+  h
+}
+
+draw_heatmap(brca.data, tt.brca, brca.clin.sub, rownames(tt.brca)[1:30])
+save(tt.brca, file=file.path(data.dir, "baseline/tcga.DEG.Rdata"))
+```
+
+Those selected DEGs are used as features of algorithms in the next step.
+
+
+
+## MetaBric data
+### Filter low mean genes
+```{R}
+gene.rest <- lowMeans.filter(mb.expr.sub, 70)
+mb.data <- mb.expr.sub[match(gene.rest, rownames(mb.expr.sub)), ]
+```
+
+
+### DE analysis - MetaBric
+Using limma-trend here as well.
+```{R}
+# Construct design matrixx
+type <- factor(mb.clin.sub$Pam50Subtype)
+# mb.clin.sub$grade <- as.character(mb.clin.sub$grade)
+# mb.clin.sub$grade[is.na(mb.clin.sub$grade)] <- 'NA'
+# stage <- factor(mb.clin.sub$grade)
+# age <- as.numeric(mb.clin.sub$age_at_diagnosis)
+
+design <- model.matrix(~ type)
+head(design, 5)
+type1 <- 'typeLumB'
+
+vfit <- lmFit(mb.data, design)
+efit <- eBayes(vfit, trend = T)
+plotSA(efit, main="Final model: Mean-variance trend")
+
+# Top table
+tt.mb <- topTable(efit, number = Inf, coef = type1)
+head(tt.mb, 10)
+
+# Volcano & MA plot
+limma::volcanoplot(efit, coef = type1, highlight = 5, names = rownames(efit))
+limma::plotMA(efit, coef = type1, main = "MetaBric LumA vs LumB")
+
+# Significant gene numbers
+nrow(tt.mb[(tt.mb$adj.P.Val < 0.01), ])
+nrow(tt.mb[(tt.mb$adj.P.Val < 0.01) & (abs(tt.mb$logFC) > log2(1.2)), ])
+1329/13651 
+```
+
+### Heatmap
+```{R}
+draw_heatmap <- function(matrix, topTable, phenoDF, list) {
+  matrix <- matrix[list,]
+  hm_cdr <- phenoDF %>% select(Pam50Subtype)
+  rownames(hm_cdr) <- colnames(matrix)
+  colnames(hm_cdr)  <- c('type')
+  type <- c("#99a599", "#37637f")
+  names(type) <- unique(hm_cdr$type)
+  anno_colors <- list(type = type)
+  h <- pheatmap(matrix, annotation_col=hm_cdr, annotation_colors=anno_colors, 
+                labels_row = list, show_colnames = F)
+  h
+}
+
+draw_heatmap(mb.data, tt.mb, mb.clin.sub, rownames(tt.mb)[1:30])
+save(tt.mb, file=file.path(data.dir, "baseline/mb.DEG.Rdata"))
+```

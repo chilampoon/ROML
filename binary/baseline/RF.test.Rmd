@@ -1,0 +1,305 @@
+---
+title: "Balanced LumA vs LumB - Random Forest Testing"
+author: "Poon Chi Lam"
+date: "7/25/2019"
+output: html_document
+---
+
+- Datasets: TCGA BRCA RNA-seq and MetaBric microarray
+- Filtering: 30% low-mean genes out
+- Feature type: expression values
+- Feature selection: differential expression analysis using limma-trend
+- Normalization: QN, FSQN, TDM
+- Algorithm: random forest
+
+- Seletcted Feature sets:
+
+TCGA: top 1000 kpairs
+MetaBric: top 6000 kpairs
+
+
+One as training data and the other as testing, that is doing twice.
+
+```{R setup}
+suppressPackageStartupMessages({
+  library(tidyr)
+  library(dplyr)
+  library(reshape2)
+  library(ggplot2)
+  library(ggpubr)
+  library(caret)
+  library(pROC)
+  library(stringr)
+  library(preprocessCore)
+  library(randomForest)
+})
+source('~/ktsp/script/function/plot.utils.R')
+source('~/ktsp/script/function/cross.platform.norm.R')
+```
+
+
+## Load data
+```{R load, eval=F}
+data.dir <- '~/ktsp/data/binary/realdata/balanced'
+load(file.path(data.dir, "TCGA.balance.LumAB.Rdata"))
+load(file.path(data.dir, "MB.balance.LumAB.Rdata"))
+```
+
+
+## Organize functions
+
+1. Train a model using all training data
+2. Testing on another data
+
+```{R, eval=F}
+source('~/ktsp/script/binary/baseline.fun/test.model.R')
+
+
+runTEST <- function(ori.train, ori.test, lb.train, lb.test, featureSet, model) {
+  results <- list()
+  s.train <- ori.train[match(featureSet, rownames(ori.train)),]
+  s.test <- ori.test[match(featureSet, rownames(ori.test)),]
+
+  # Testing
+  print('======== Doing testing now ========')
+  test.result <- testing(as.data.frame(t(s.train)), as.data.frame(t(s.test)), lb.train, lb.test, model)
+  print(paste0('ACC: ', test.result$ACC))
+  test.result
+}
+```
+
+
+## TCGA as training
+Running as workflow stated
+```{R tcga, eval=F}
+lb.brca <- factor(brca.clin.sub$final_assign)
+lb.mb <- factor(mb.clin.sub$Pam50Subtype)
+
+# Use the DEG from TCGA
+load("~/ktsp/data/binary/realdata/balanced/baseline/tcga.DEG.Rdata")
+brca.train <- brca.expr.sub[match(rownames(tt.brca), rownames(brca.expr.sub)),]
+brca.train <- normalize.quantiles(as.matrix(brca.train), copy=F)
+colnames(brca.train) <- colnames(brca.expr.sub)
+rownames(brca.train) <- rownames(tt.brca)
+mb.test <- mb.expr.sub[match(rownames(tt.brca), rownames(mb.expr.sub)),]
+
+
+# Cross-platform normalization
+## 1. quantile normalization
+qn.mb.test <- cross.platform.norm(data.train = as.matrix(brca.train), 
+                                  data.test = as.matrix(mb.test), 
+                                  method = 'QN')
+
+## 2. feature specific normalization
+fsqn.mb.test <- cross.platform.norm(data.train = as.matrix(brca.train), 
+                                    data.test = as.matrix(mb.test), 
+                                    method = 'FSQN')
+
+## 3. training distribution matching
+tdm.mb.test <- cross.platform.norm(data.train = as.matrix(brca.train), 
+                                   data.test = as.matrix(mb.test), 
+                                   method = 'TDM')
+
+# After normalization
+dataDis(data.list = list(brca.train, mb.test, qn.mb.test, fsqn.mb.test, tdm.mb.test), 
+        labels = c('TCGA', 'METABRIC', 'QN-METABRIC', 'FSQN-METABRIC', 'TDM-METABRIC'))
+```
+
+
+## Testing on MB
+```{R, eval=F}
+norm.method <- c('QN', 'FSQN', 'TDM')
+
+# select top 1000 degs
+features <- rownames(tt.brca[1:1000,])
+data.train <- brca.train[match(features, rownames(brca.train)),]
+data.train <- cbind.data.frame(as.data.frame(t(data.train)), type=lb.brca)
+full.model <- randomForest(type~., data = data.train, ntree = 501, replace = F)
+
+for (norm in norm.method) {
+  result <- list()
+  print(norm)
+  if (norm == 'QN') {
+    nm.test <- qn.mb.test
+  } else if (norm == 'FSQN') {
+    nm.test <- fsqn.mb.test
+  } else if (norm == 'TDM') {
+    nm.test <- tdm.mb.test
+  }
+  
+  tcga.test <- runTEST(brca.train, nm.test, lb.brca, lb.mb, features, full.model)
+
+  save(tcga.test, file=file.path(data.dir, paste0('baseline/result/tcga.TEST.', norm, '.RF.Rdata')))
+}
+```
+
+
+
+
+## MetaBric as training
+### Cross-platform normalization
+```{R, eval=F}
+load(file.path(data.dir, "baseline/mb.DEG.Rdata"))
+mb.train <- mb.expr.sub[match(rownames(tt.mb), rownames(mb.expr.sub)), ]
+mb.train <- normalize.quantiles(as.matrix(mb.train), copy=F)
+colnames(mb.train) <- colnames(mb.expr.sub)
+rownames(mb.train) <- rownames(tt.mb)
+brca.test <- brca.expr.sub[match(rownames(tt.mb), rownames(brca.expr.sub)),]
+
+
+# Cross-platform normalization
+## 1. quantile normalization
+qn.brca.test <- cross.platform.norm(data.train = as.matrix(mb.train), 
+                                    data.test = as.matrix(brca.test), 
+                                    method = 'QN')
+
+## 2. feature specific normalization
+fsqn.brca.test <- cross.platform.norm(data.train = as.matrix(mb.train), 
+                                      data.test = as.matrix(brca.test), 
+                                      method = 'FSQN')
+
+## 3. training distribution matching
+tdm.brca.test <- cross.platform.norm(data.train = as.matrix(mb.train), 
+                                     data.test = as.matrix(brca.test), 
+                                     method = 'TDM')
+
+
+# After normalization
+dataDis(data.list = list(mb.train, brca.test, qn.brca.test, fsqn.brca.test, tdm.brca.test), 
+        labels = c('METABRIC', 'TCGA', 'QN-TCGA', 'FSQN-TCGA', 'TDM-TCGA'))
+```
+
+
+## TESTING
+```{R, eval=F}
+# Train a model using all training data
+# select top 500 degs
+features <- rownames(tt.mb[1:500,])
+data.train <- mb.train[match(features, rownames(mb.train)),]
+data.train <- cbind.data.frame(as.data.frame(t(data.train)), type=lb.mb)
+full.model <- randomForest(type~., data = data.train, ntree = 501, replace = F)
+
+for (norm in norm.method) {
+  result <- list()
+  print(norm)
+  if (norm == 'QN') {
+    nm.test <- qn.brca.test
+  } else if (norm == 'FSQN') {
+    nm.test <- fsqn.brca.test
+  } else if (norm == 'TDM') {
+    nm.test <- tdm.brca.test
+  }
+  
+  mb.test <- runTEST(mb.train, nm.test, lb.mb, lb.brca, features, full.model)
+
+  save(mb.test, file=file.path(data.dir, paste0('baseline/result/mb.TEST.', norm, '.RF.Rdata')))
+}
+```
+
+
+## Visulization
+```{R vis, fig.width=12, fig.height=4}
+## TCGA TESTING
+data.dir <- '~/ktsp/data/binary/realdata/balanced'
+norm.method <- c('QN', 'FSQN', 'TDM')
+final.plot <- data.frame()
+for (norm in norm.method) {
+  load(file.path(data.dir, paste0('baseline/result/tcga.TEST.', norm, '.RF.Rdata')))
+  df <- data.frame(ACC=0, ACCub=0, ACClb=0, YD=0)
+  list <- tcga.test
+  df$ACC <- list[['ACC']]
+  df$ACCub <- list[["cm"]][["overall"]][["AccuracyUpper"]]
+  df$ACClb <- list[["cm"]][["overall"]][["AccuracyLower"]]
+  df$YD <- list[["Youden"]]
+  df$Method <- rep(norm, nrow(df))
+  final.plot <- rbind(final.plot, df)
+}
+final.plot$Method <- paste0('RF+', final.plot$Method)
+
+# load ROML result
+load("~/ktsp/data/binary/realdata/balanced/ROML/tcga.TEST.RF.Rdata")
+final.plot[4,]$ACC <- tcga.test[["100"]][["ACC"]]
+final.plot[4,]$ACCub <- tcga.test[["100"]][["cm"]][["overall"]][["AccuracyUpper"]]
+final.plot[4,]$ACClb <- tcga.test[["100"]][["cm"]][["overall"]][["AccuracyLower"]]
+final.plot[4,]$YD <- tcga.test[["100"]][["Youden"]]
+final.plot[4,]$Method <- 'ROML'
+
+final.plot$Method <- factor(final.plot$Method, levels=as.character(final.plot$Method))
+print(final.plot)
+
+# TEST acc
+g1 <- ggplot(final.plot, aes(x=Method, y=ACC, group=Method, color=Method)) + 
+  geom_point(size=4) + labs(y='Accuracy', x='') + ggtitle(paste0('TCGA TEST ACC')) +
+  geom_errorbar(aes(ymin=ACClb, ymax=ACCub), width=.05,
+             position=position_dodge(0.05)) +
+  #scale_x_discrete(limits = norm.method) +
+  scale_y_continuous(breaks = seq(0,1, by=0.1), limits = c(0,1)) +
+  scale_color_brewer(palette='Set2') +
+  theme_bw()
+
+
+# TEST youden
+g2 <- ggplot(final.plot, aes(x=Method, y=YD, group=Method, color=Method)) + 
+  geom_point(size=4) + labs(y='Youden Index', x='') + 
+  ggtitle('TCGA Youden Index') +
+  #geom_errorbar(aes(ymin=meanYD-sdYD, ymax=meanYD+sdYD), width=.2,
+            # position=position_dodge(0.05)) +
+  #scale_x_discrete(limits = norm.method) +
+  scale_y_continuous(breaks = seq(0,1, by=0.1), limits = c(0,1)) +
+  scale_color_brewer(palette='Set2') +
+  theme_bw()
+
+ggarrange(g1, g2, ncol=2, nrow=1, common.legend = T, legend = 'right')
+
+
+## MeatBric TESTING
+final.plot <- data.frame()
+for (norm in norm.method) {
+  load(file.path(data.dir, paste0('baseline/result/mb.TEST.', norm, '.RF.Rdata')))
+  df <- data.frame(ACC=0, ACCub=0, ACClb=0, YD=0)
+  list <- mb.test
+  df$ACC <- list[['ACC']]
+  df$ACCub <- list[["cm"]][["overall"]][["AccuracyUpper"]]
+  df$ACClb <- list[["cm"]][["overall"]][["AccuracyLower"]]
+  df$YD <- list[["Youden"]]
+  df$Method <- rep(norm, nrow(df))
+  final.plot <- rbind(final.plot, df)
+}
+final.plot$Method <- paste0('RF+', final.plot$Method)
+
+
+# ADD ROML results
+load("~/ktsp/data/binary/realdata/balanced/ROML/mb.TEST.RF.Rdata")
+final.plot[4,]$ACC <- mb.test[["6000"]][["ACC"]]
+final.plot[4,]$ACCub <- mb.test[["6000"]][["cm"]][["overall"]][["AccuracyUpper"]]
+final.plot[4,]$ACClb <- mb.test[["6000"]][["cm"]][["overall"]][["AccuracyLower"]]
+final.plot[4,]$YD <- mb.test[["6000"]][["Youden"]]
+final.plot[4,]$Method <- 'ROML'
+
+final.plot$Method <- factor(final.plot$Method, levels=final.plot$Method)
+print(final.plot)
+
+# TEST acc
+g1 <- ggplot(final.plot, aes(x=Method, y=ACC, group=Method, color=Method)) + 
+  geom_point(size=4) + labs(y='Accuracy', x='') + ggtitle(paste0('METABRIC TEST ACC')) +
+  geom_errorbar(aes(ymin=ACClb, ymax=ACCub), width=.05,
+             position=position_dodge(0.05)) +
+  #scale_x_discrete(limits = norm.method) +
+  scale_y_continuous(breaks = seq(0,1, by=0.1), limits = c(0,1)) +
+  scale_color_brewer(palette='Pastel1') +
+  theme_bw()
+
+
+# TEST youden
+g2 <- ggplot(final.plot, aes(x=Method, y=YD, group=Method, color=Method)) + 
+  geom_point(size=4) + labs(y='Youden Index', x='') + 
+  ggtitle('METABRIC Youden Index') +
+  #geom_errorbar(aes(ymin=meanYD-sdYD, ymax=meanYD+sdYD), width=.2,
+            # position=position_dodge(0.05)) +
+  #scale_x_discrete(limits = norm.method) +
+  scale_y_continuous(breaks = seq(0,1, by=0.1), limits = c(0,1)) +
+  scale_color_brewer(palette='Pastel1') +
+  theme_bw()
+
+ggarrange(g1, g2, ncol=2, nrow=1, common.legend = T, legend = 'right')
+```
