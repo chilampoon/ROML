@@ -1,0 +1,89 @@
+---
+title: "LumA vs LumB - ROML (RF) Testing"
+author: "Poon Chi Lam"
+date: "7/27/2019"
+output: html_document
+---
+
+Testing on independent data, K is based on CV.
+
+
+```{r setup}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(randomForest)
+  library(caret)
+  library(caTools)
+  library(ggpubr)
+})
+source('~/ktsp/script/function/binary.test.R')
+```
+
+
+## Load data
+```{R load}
+data.dir <- '~/ktsp/data/binary/realdata/balanced'
+load(file.path(data.dir, "TCGA.balance.LumAB.Rdata"))
+load(file.path(data.dir, "MB.balance.LumAB.Rdata"))
+
+lb.brca <- factor(brca.clin.sub$final_assign)
+lb.mb <- factor(mb.clin.sub$Pam50Subtype)
+```
+
+
+## TCGA as training
+Best K = 100
+
+```{R, eval=F}
+# Select 70% filtered genes
+gene.remain <- lowMeans.filter(brca.expr.sub, 70)
+brca.train <- brca.expr.sub[match(gene.remain, rownames(brca.expr.sub)), ]
+mb.test <- mb.expr.sub[match(rownames(gene.remain), rownames(mb.expr.sub)),]
+
+# get tsp scores
+load(file.path(data.dir, 'ROML/tcga.TSPscore.Rdata'))
+K <- 100 # select by CV
+kpairs <- tcga.tsp[c(1:K), ]
+
+#testing
+tcga.model <- train.bi.model(ori.train=brca.train, 
+                             lb.train=lb.brca, 
+                             featureSet=kpairs, 
+                             baseline=FALSE)
+
+tcga.test <- bi.test(data.test=mb.test,
+                     label.test=lb.mb, 
+                     model=tcga.model, 
+                     kpairs=kpairs)
+
+save(tcga.test, file=file.path(data.dir, 'ROML/tcga.TEST.RF.Rdata'))
+```
+
+
+
+## MetaBric as training
+```{R}
+# Select 70% filtered genes
+gene.remain <- lowMeans.filter(mb.expr.sub, 70)
+mb.train <- mb.expr.sub[match(gene.remain, rownames(mb.expr.sub)), ]
+brca.test <- brca.expr.sub[match(rownames(gene.remain), rownames(brca.expr.sub)),]
+
+# get tsp scores
+load(file.path(data.dir, 'ROML/mb.TSPscore.Rdata'))
+K <- 6000 # select by CV
+kpairs <- mb.tsp[c(1:K), ]
+
+#testing
+mb.model <- train.bi.model(ori.train=mb.train, 
+                           lb.train=lb.mb, 
+                           featureSet=kpairs, 
+                           baseline=FALSE)
+
+mb.test <- bi.test(data.test=brca.test,
+                   label.test=lb.brca, 
+                   model=mb.model, 
+                   kpairs=kpairs)
+
+save(mb.test, file=file.path(data.dir, 'ROML/mb.TEST.RF.Rdata'))
+```
+

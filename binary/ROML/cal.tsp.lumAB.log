@@ -1,0 +1,54 @@
+
+R version 3.6.0 (2019-04-26) -- "Planting of a Tree"
+Copyright (C) 2019 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> ### Calculate KTSP scores
+> source('~/ktsp/script/function/cal.TSPscore.R')
+> 
+> # Balanced LumA vs LumB
+> 
+> data.dir <- '~/ktsp/data/binary/realdata/balanced'
+> load(file.path(data.dir, "TCGA.balance.LumAB.Rdata"))
+> load(file.path(data.dir, "MB.balance.LumAB.Rdata"))
+> 
+> lb.brca <- factor(brca.clin.sub$final_assign)
+> lb.mb <- factor(mb.clin.sub$Pam50Subtype)
+> 
+> # TCGA -> MB
+> load(file.path(data.dir, "baseline/tcga.DEG.Rdata"))
+> brca.train <- brca.expr.sub[match(rownames(tt.brca), rownames(brca.expr.sub)),]
+> mb.test <- mb.expr.sub[match(rownames(tt.brca), rownames(mb.expr.sub)),]
+> 
+> tcga.tsp <- cal.TSPscore(brca.train, lb.brca)
+> save(tcga.tsp, file = file.path(data.dir, 'ROML/tcga.TSPscore.Rdata'))
+> 
+> # MB -> TCGA
+> load(file.path(data.dir, "baseline/mb.DEG.Rdata"))
+> mb.train <- mb.expr.sub[match(rownames(tt.mb), rownames(mb.expr.sub)),]
+> brca.test <- brca.expr.sub[match(rownames(tt.mb), rownames(brca.expr.sub)),]
+> 
+> # Workflow
+> mb.tsp <- cal.TSPscore(mb.train, lb.mb)
+> save(mb.tsp, file = file.path(data.dir, 'ROML/mb.TSPscore.Rdata'))
+> 
+> 
+> 
+> 
+> proc.time()
+    user   system  elapsed 
+7960.160  223.939 8204.856 
