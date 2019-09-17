@@ -13,7 +13,7 @@ cal.TSPscore <- function(expr, label, t.stat=TRUE) {
   rownames(tmp) <- NULL
   tmp <- tmp[tmp$score > 0, ] # use positive scores only, since they are symmetric
   
-  if (t.stat=TRUE) {
+  if (t.stat == TRUE) {
     t.df <- as.data.frame(t(apply(tmp[ ,-1], 1, split_statistic, data.train=expr, label=label)))
     tmp <- cbind(tmp, t.df)
   }

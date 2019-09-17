@@ -1,8 +1,13 @@
-# rfTSP multiclass prediction of cancer outcomes
+TO DO (sep 2019):
+
+Modify all CV and multi-class model 3 functions to parallel computing way
+
+---
+# rfTSP cancer outcome prediction
 
 There are two main parts of it:
 
-1. Simulation - using data with underlying truth to prove our hypotheses
+~~1. Simulation - using data with underlying truth to prove our hypotheses~~
 2. Real data application - implying our proposed models on TCGA BRCA and MetaBric datasets
 
 ---
@@ -23,10 +28,6 @@ There are two main parts of it:
 CRC:
 TCGA RNA-seq
 
-TPM data from ARCHS4: https://amp.pharm.mssm.edu/archs4/download.html
-
-Does RSEM normalized data correct for gene length already?
 
 KFSYSCC:
 https://www.synapse.org/#!Synapse:syn4974668
-
