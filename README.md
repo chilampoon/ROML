@@ -1,12 +1,9 @@
-
----
 # Robust Rrder-based Machine Learning ROML framework
 
 Built binary and multi-class classifiers for cancer subtypes
 
----
 
-## Models
+### Models
 
 - Binary
 - Multi-class
@@ -15,12 +12,12 @@ Built binary and multi-class classifiers for cancer subtypes
   - Model 3: pairwise binary models + objective function
 
 
-## Simulation
+### Simulation
 
-The results were not as expected...
+The results were not as we expected...
 
 
-## Real data application
+### Real data application
 
 - Breast cancer
   - RNA-seq: TCGA-BRCA
