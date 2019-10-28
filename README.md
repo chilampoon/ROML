@@ -3,9 +3,12 @@
 Built binary and multi-class classifiers for cancer subtypes
 
 
-### Models
+### Feature selecion
+- kTSP score calculation
+- Gene pairs are converted to 0-1 binary features
 
-- Binary
+### Random Forest Models
+- Binary 
 - Multi-class
   - Model 1: one-vs-rest
   - Model 2: pairwise
