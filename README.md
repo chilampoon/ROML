@@ -22,10 +22,12 @@ The results were not as we expected...
 - Breast cancer
   - RNA-seq: TCGA-BRCA
   - Microarray: MetaBric
+  - Subtypes: Basal, Her2, LumA, LumB
 
 - Colorectal cancer
   - RNA-seq: TCGA-COAD
   - Microarray: [KFSYSCC](https://www.synapse.org/#!Synapse:syn4974668)
+  - Subtypes: CMS1, CMS2, CMS3, CMS4
 
 ---
 
