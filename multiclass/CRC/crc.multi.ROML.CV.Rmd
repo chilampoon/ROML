@@ -1,0 +1,269 @@
+---
+title: "CRC multi-class ROML Cross-validation"
+author: "Poon Chi Lam"
+date: "8/12/2019"
+output: html_document
+---
+
+There are three models proposed:
+
+- Model 1: one vs all other
+- Model 2: pairwise comparison
+- Model 3: pairwise comparison + objective function
+
+```{R setup}
+suppressPackageStartupMessages({
+  library(tidyr)
+  library(dplyr)
+  library(reshape2)
+  library(ggplot2)
+  library(ggpubr)
+  library(caret)
+  library(pROC)
+  library(stringr)
+  library(randomForest)
+})
+source('~/ktsp/script/function/plot.utils.R')
+source('~/ktsp/script/function/merge.kpairs.R')
+source('~/ktsp/script/function/multi.rf.cv.R')
+```
+
+
+### load data
+```{R}
+load('~/ktsp/CRC/TCGA.COAD.Rdata')
+load('~/ktsp/CRC/kfsyscc.CRC.Rdata')
+
+lb.coad <- factor(coad.clin$cms_label)
+lb.kf <- factor(kf.clin$cms_label)
+
+Ks <- c(50, 100, 300, 500, 1000)
+```
+
+
+## TCGA as training
+### Cross-validation 
+#### Model 1
+
+```{R, eval=F}
+grp.names <- levels(lb.coad)
+
+## load the scores calculated before
+score.dir <- "~/ktsp/CRC/multiclass/score/tcga"
+tcga.tsp <- list()
+for (class in grp.names) {
+  load(file.path(score.dir, paste0(class, '.score.Rdata')))
+  colnames(tsp) <- c('score', 'geneX', 'geneY')
+  tcga.tsp[[class]] <- tsp[c(1:max(Ks)),]
+}
+
+tcga.kpairs <- merge.kpairs(Ks = Ks, 
+                            tsp.list = tcga.tsp, 
+                            no.model = 1)
+
+tcga.cv.m1 <- list()
+for (K in Ks) {
+  print(paste0('---- K = ', K))
+  tcga.cv.m1[[as.character(K)]] <- multi.rf.cv(dataframe=as.data.frame(t(coad.expr)), 
+                                              label=lb.coad, 
+                                              K=K, 
+                                              kpairs=tcga.kpairs, 
+                                              grp.names=grp.names,
+                                              model.no=1, 
+                                              time=10)
+}
+save(tcga.cv.m1, file='~/ktsp/CRC/multiclass/ROML.CV.res/tcga.cv.m1.Rdata')
+```
+
+
+#### Model 2
+Pairwise ktsp score calculation -> select features -> random forest
+
+```{R,eval=F}
+## load the scores calculated before
+tcga.tsp <- list()
+for (i in 1:(length(grp.names)-1)) {
+  for (j in (i+1):length(grp.names)) {
+    comp <- paste0(grp.names[i], "_", grp.names[j])
+    load(file.path(score.dir, paste0(comp, ".score.Rdata")))
+    colnames(tsp) <- c('score', 'geneX', 'geneY')
+    tcga.tsp[[comp]] <- tsp[c(1:max(Ks)),]
+  }
+}
+
+tcga.kpairs <- merge.kpairs(Ks = Ks, 
+                            tsp.list = tcga.tsp, 
+                            no.model = 2)
+
+tcga.cv.m2 <- list()
+for (K in Ks) {
+  print(paste0('---- K = ', K))
+  tcga.cv.m2[[as.character(K)]] <- multi.rf.cv(dataframe=as.data.frame(t(coad.expr)), 
+                                              label=lb.coad, 
+                                              K=K, 
+                                              kpairs=tcga.kpairs, 
+                                              grp.names=grp.names,
+                                              model.no=2, 
+                                              time=10)
+}
+save(tcga.cv.m2, file='~/ktsp/CRC/multiclass/ROML.CV.res/tcga.cv.m2.Rdata')
+```
+
+
+#### Model 3
+Pairwise ktsp score calculation -> select features -> random forest
+
+```{R, eval=F}
+## load the scores calculated before
+tcga.kpairs <- merge.kpairs(Ks = Ks, 
+                            tsp.list = tcga.tsp, 
+                            no.model = 3)
+
+tcga.cv.m3 <- list()
+for (K in Ks) {
+  print(paste0('---- K = ', K))
+  tcga.cv.m3[[as.character(K)]] <- multi.rf.cv(dataframe=as.data.frame(t(coad.expr)), 
+                                              label=lb.coad, 
+                                              K=K, 
+                                              grp.names=grp.names,
+                                              kpairs=tcga.kpairs, 
+                                              model.no=3, 
+                                              time=1)
+}
+save(tcga.cv.m3, file='~/ktsp/CRC/multiclass/multi.results/tcga.cv.m3.Rdata')
+```
+
+
+
+## KFSYSCC as training
+### Cross-validation 
+#### Model 1
+
+```{R, eval=F}
+grp.names <- levels(lb.kf)
+
+## load the scores calculated before
+score.dir <- "~/ktsp/CRC/multiclass/score/kfsyscc"
+kf.tsp <- list()
+for (class in grp.names) {
+  load(file.path(score.dir, paste0(class, '.score.Rdata')))
+  colnames(tsp) <- c('score', 'geneX', 'geneY')
+  kf.tsp[[class]] <- tsp[c(1:max(Ks)),]
+}
+
+kf.kpairs <- merge.kpairs(Ks = Ks, 
+                          tsp.list = kf.tsp, 
+                          no.model = 1)
+
+kf.cv.m1 <- list()
+for (K in Ks) {
+  print(paste0('---- K = ', K))
+  kf.cv.m1[[as.character(K)]] <- multi.rf.cv(dataframe=as.data.frame(t(kf.expr)), 
+                                              label=lb.kf, 
+                                              K=K, 
+                                              kpairs=kf.kpairs, 
+                                              grp.names=grp.names,
+                                              model.no=1, 
+                                              time=10)
+}
+save(kf.cv.m1, file='~/ktsp/CRC/multiclass/ROML.CV.res/kf.cv.m1.Rdata')
+```
+
+
+#### Model 2
+```{R, eval=F}
+## load the scores calculated before
+kf.tsp <- list()
+for (i in 1:(length(grp.names)-1)) {
+  for (j in (i+1):length(grp.names)) {
+    comp <- paste0(grp.names[i], "_", grp.names[j])
+    load(file.path(score.dir, paste0(comp, ".score.Rdata")))
+    colnames(tsp) <- c('score', 'geneX', 'geneY')
+    kf.tsp[[comp]] <- tsp[c(1:max(Ks)),]
+  }
+}
+
+kf.kpairs <- merge.kpairs(Ks = Ks, 
+                          tsp.list = kf.tsp, 
+                          no.model = 2)
+
+kf.cv.m2 <- list()
+for (K in Ks) {
+  print(paste0('---- K = ', K))
+  kf.cv.m2[[as.character(K)]] <- multi.rf.cv(dataframe=as.data.frame(t(kf.expr)), 
+                                              label=lb.kf, 
+                                              K=K, 
+                                              kpairs=kf.kpairs, 
+                                              grp.names=grp.names,
+                                              model.no=2, 
+                                              time=10)
+}
+save(kf.cv.m2, file='~/ktsp/CRC/multiclass/ROML.CV.res/kf.cv.m2.Rdata')
+```
+
+
+#### Model 3
+Pairwise ktsp score calculation -> select features -> random forest
+
+```{R, eval=F}
+## load the scores calculated before
+mb.kpairs <- merge.kpairs(Ks = Ks, 
+                          tsp.list = mb.tsp, 
+                          no.model = 3)
+
+mb.cv.m3 <- list()
+for (K in Ks) {
+  print(paste0('---- K = ', K))
+  mb.cv.m3[[as.character(K)]] <- multi.rf.cv(dataframe=as.data.frame(t(mb.train)), 
+                                             label=lb.mb, 
+                                             K=K, 
+                                             kpairs=mb.kpairs, 
+                                             grp.names=grp.names,
+                                             model.no=3, 
+                                             time=1)
+}
+save(mb.cv.m3, file='~/ktsp/data/multiclass/realdata/imbalanced/multi.results/mb.cv.m3.Rdata')
+```
+
+
+## See the results
+```{R}
+Ks <- c(50, 100, 300, 500, 1000)
+# tcga m1
+res.dir <- '~/ktsp/CRC/multiclass/ROML.CV.res'
+load(file.path(res.dir, 'tcga.cv.m1.Rdata'))
+print('tcga m1')
+for (K in Ks) {
+  yd.df <- tcga.cv.m1[[as.character(K)]][["all.youden"]]
+  print(mean(yd.df$meanV))
+}
+
+
+# tcga m2
+load(file.path(res.dir, 'tcga.cv.m2.Rdata'))
+print('tcga m2')
+for (K in Ks) {
+  yd.df <- tcga.cv.m2[[as.character(K)]][["all.youden"]]
+  print(mean(yd.df$meanV))
+}
+
+
+# kf m1
+load(file.path(res.dir, 'kf.cv.m1.Rdata'))
+print('kf m1')
+for (K in Ks) {
+  yd.df <- kf.cv.m1[[as.character(K)]][["all.youden"]]
+  print(mean(yd.df$meanV))
+}
+
+
+# kf m2
+load(file.path(res.dir, 'kf.cv.m2.Rdata'))
+print('kf m2')
+for (K in Ks) {
+  yd.df <- kf.cv.m2[[as.character(K)]][["all.youden"]]
+  print(mean(yd.df$meanV))
+}
+
+
+```

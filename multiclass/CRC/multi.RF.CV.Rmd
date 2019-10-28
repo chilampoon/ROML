@@ -1,0 +1,130 @@
+---
+title: "CRC multi-class: Random Forest cross validation"
+author: "Poon Chi Lam"
+date: "8/11/2019"
+output: html_document
+---
+
+```{r setup}
+suppressPackageStartupMessages({
+  library(tidyr)
+  library(dplyr)
+  library(reshape2)
+  library(ggpubr)
+  library(stringr)
+})
+source('~/ktsp/script/function/plot.utils.R')
+source('~/ktsp/script/function/lowMeans.filter.R')
+source('~/ktsp/script/function/multi.rf.cv.R')
+```
+
+
+## Load data
+```{R}
+load('~/ktsp/CRC/TCGA.COAD.Rdata')
+load('~/ktsp/CRC/kfsyscc.CRC.Rdata')
+
+lb.coad <- factor(coad.clin$cms_label)
+lb.kf <- factor(kf.clin$cms_label)
+table(lb.coad);table(lb.kf)
+```
+
+
+## TCGA as training
+
+### Low mean filtering
+```{R}
+gene.keep <- lowMeans.filter(coad.expr, 70)
+coad.data <- coad.expr[match(gene.keep, rownames(coad.expr)), ]
+```
+
+
+### Run cross-validation
+#### Feature selection
+```{R}
+# Select features by ANNOVA
+library(doParallel)
+registerDoParallel()
+p.val <- foreach (i = 1:nrow(coad.data)) %dopar% {
+  aov <- aov(unlist(coad.data[i, ])~lb.coad)
+  summary <- summary(aov)
+  summary[[1]][["Pr(>F)"]][1]
+}
+p.val <- unlist(p.val)
+
+# Top x% of genes
+features <- list()
+cuts <- quantile(p.val, probs = seq(0, 1, .01), na.rm = T)
+features[['sub.01']] <- rownames(coad.data)[which(p.val < cuts[2])] # 126
+features[['sub.04']] <- rownames(coad.data)[which(p.val < cuts[5])] # 503
+features[['sub.07']] <- rownames(coad.data)[which(p.val < cuts[8])] # 879
+features[['sub.10']] <- rownames(coad.data)[which(p.val < cuts[11])] # 1256
+save(features, file='~/ktsp/CRC/multiclass/coad.fscore.Rdata')
+```
+
+
+#### Organize functions
+```{R}
+# Conduct the workflow
+runCV <- function(ori.train, lb.train, featureSet) {
+  s.train <- ori.train[match(featureSet, rownames(ori.train)),]
+
+  print('======== Doing cross-validation now ========')
+  cv.result <- multi.rf.cv(dataframe=as.data.frame(t(s.train)), label=lb.train, time=10)
+  cv.result
+}
+```
+
+
+#### Run CV
+```{R}
+coad.cv <- list()
+for (i in names(features)) {
+  print(i)
+  coad.cv[[i]] <- runCV(ori.train=coad.expr, lb.train=lb.coad, featureSet=features[[i]])
+}
+
+save(coad.cv, file='~/ktsp/CRC/multiclass/coad.CV.RF.Rdata')
+```
+
+
+## KFSYSCC as training
+
+### Low mean filtering
+```{R}
+gene.keep <- lowMeans.filter(kf.expr, 70)
+kf.data <- kf.expr[match(gene.keep, rownames(kf.expr)), ]
+```
+
+
+#### Select feat
+```{R}
+p.val <- foreach (i = 1:nrow(kf.data)) %dopar% {
+  aov <- aov(unlist(kf.data[i, ])~lb.kf)
+  summary <- summary(aov)
+  summary[[1]][["Pr(>F)"]][1]
+}
+p.val <- unlist(p.val)
+
+# Top x% of genes
+features <- list()
+cuts <- quantile(p.val, probs = seq(0, 1, .01), na.rm = T)
+features[['sub.01']] <- rownames(kf.data)[which(p.val < cuts[2])] # 126
+features[['sub.04']] <- rownames(kf.data)[which(p.val < cuts[5])] # 503
+features[['sub.07']] <- rownames(kf.data)[which(p.val < cuts[8])] # 879
+features[['sub.10']] <- rownames(kf.data)[which(p.val < cuts[11])] # 1256
+save(features, file='~/ktsp/CRC/multiclass/kfsyscc.fscore.Rdata')
+```
+
+
+#### Run CV
+```{R}
+kf.cv <- list()
+for (i in names(features)) {
+  print(i)
+  kf.cv[[i]] <- runCV(kf.expr, lb.kf, features[[i]])
+}
+
+save(coad.cv, file='~/ktsp/CRC/multiclass/kfsyscc.CV.RF.Rdata')
+```
+

@@ -1,0 +1,206 @@
+---
+title: "BRCA multiclass classification - baseline RF"
+author: "Poon Chi Lam"
+date: "8/3/2019"
+output: html_document
+---
+
+- Datasets: TCGA BRCA RNA-seq and MetaBric microarray
+- Filtering: 30% low-mean genes out 
+- Feature type: expression values
+- Feature selection: p-values of ANNOVA
+- Algorithm: random forest
+
+- Feature sets:
+
+1. top 1%
+2. top 5%
+3. top 10%
+
+-> Select the best feature set by the performance of cross-validation.
+
+Outcomes:
+
+- Basal
+- Her2
+- LumA
+- LumB
+
+
+
+One as training data and the other as testing, that is doing twice.
+
+```{r setup}
+suppressPackageStartupMessages({
+  library(tidyr)
+  library(dplyr)
+  library(reshape2)
+  library(ggplot2)
+  library(ggpubr)
+  library(caret)
+  library(pROC)
+  library(stringr)
+  library(randomForest)
+})
+source('~/ktsp/script/function/plot.utils.R')
+source('~/ktsp/script/function/cross.platform.norm.R')
+```
+
+
+# TCGA as training
+
+```{R}
+# load data
+load('~/ktsp/data/multiclass/realdata/imbalanced/BRCA.multi.Rdata')
+load('~/ktsp/data/multiclass/realdata/imbalanced/MB.multi.Rdata')
+
+lb.brca <- factor(mul.brca.clin$final_assign)
+lb.mb <- factor(mul.mb.clin$Pam50Subtype)
+table(lb.brca);table(lb.mb)
+```
+
+
+## Low mean filtering
+```{R}
+source('~/ktsp/script/function/lowMeans.filter.R')
+gene.keep <- lowMeans.filter(mul.brca.expr, 70)
+brca.data <- mul.brca.expr[match(gene.keep, rownames(mul.brca.expr)), ]
+```
+
+
+## Run cross-validation
+### Feature selection
+```{R}
+# Select features by ANNOVA
+grp <- factor(mul.brca.clin$final_assign)
+
+library(doParallel)
+registerDoParallel()
+p.val <- foreach (i = 1:nrow(brca.data)) %dopar% {
+  aov <- aov(unlist(brca.data[i, ])~grp)
+  summary <- summary(aov)
+  summary[[1]][["Pr(>F)"]][1]
+}
+p.val <- unlist(p.val)
+
+# Top x% of genes
+features <- list()
+cuts <- quantile(p.val, probs = seq(0, 1, .01), na.rm = T)
+features[['sub.01']] <- rownames(brca.data)[which(p.val < cuts[2])] # 128
+features[['sub.04']] <- rownames(brca.data)[which(p.val < cuts[5])] # 510
+features[['sub.07']] <- rownames(brca.data)[which(p.val < cuts[8])] # 892
+features[['sub.10']] <- rownames(brca.data)[which(p.val < cuts[11])] # 1247
+save(features, file='~/ktsp/data/multiclass/realdata/imbalanced/tcga.fscore.Rdata')
+```
+
+
+### cv
+#### Organize functions
+```{R}
+source('~/ktsp/script/function/multi.CV.R')
+
+# Conduct the workflow
+runCV <- function(ori.train, lb.train, featureSet) {
+  s.train <- ori.train[match(featureSet, rownames(ori.train)),]
+
+  print('======== Doing cross-validation now ========')
+  cv.result <- multi.rf.cv(dataframe=as.data.frame(t(s.train)), label=lb.train, time=10)
+  cv.result
+}
+```
+
+
+#### TCGA as training
+```{R}
+tcga.cv <- list()
+for (i in names(features)) {
+  print(i)
+  tcga.cv[[i]] <- runCV(mul.brca.expr, lb.brca, features[[i]])
+}
+
+save(tcga.cv, file='~/ktsp/data/multiclass/realdata/imbalanced/tcga.CV.RF.Rdata')
+```
+
+
+
+#### MetaBric as training
+```{R}
+gene.keep <- lowMeans.filter(mul.mb.expr, 70)
+mb.data <- mul.mb.expr[match(gene.keep, rownames(mul.mb.expr)), ]
+
+# Select features by ANNOVA
+grp <- factor(mul.mb.clin$Pam50Subtype)
+
+registerDoParallel()
+p.val <- foreach (i = 1:nrow(mb.data)) %dopar% {
+  aov <- aov(unlist(mb.data[i, ])~grp)
+  summary <- summary(aov)
+  summary[[1]][["Pr(>F)"]][1]
+}
+p.val <- unlist(p.val)
+
+# Top x% of genes
+features <- list()
+cuts <- quantile(p.val, probs = seq(0, 1, .01), na.rm = T)
+features[['sub.01']] <- rownames(mb.data)[which(p.val < cuts[2])] # 128
+features[['sub.04']] <- rownames(mb.data)[which(p.val < cuts[5])] # 510
+features[['sub.07']] <- rownames(mb.data)[which(p.val < cuts[8])] # 892
+features[['sub.10']] <- rownames(mb.data)[which(p.val < cuts[11])] # 1247
+save(features, file='~/ktsp/data/multiclass/realdata/imbalanced/mb.fscore.Rdata')
+
+mb.cv <- list()
+for (i in names(features)) {
+  print(i)
+  mb.cv[[i]] <- runCV(mul.mb.expr, lb.mb, features[[i]])
+}
+
+save(mb.cv, file='~/ktsp/data/multiclass/realdata/imbalanced/mb.CV.RF.Rdata')
+```
+
+
+## Visualization
+
+```{R, eval=F}
+load("~/ktsp/data/multiclass/realdata/imbalanced/tcga.CV.RF.Rdata")
+load("~/ktsp/data/multiclass/realdata/imbalanced/mb.CV.RF.Rdata")
+
+for (i in names(tcga.cv)) {
+  yd.df <- tcga.cv[[i]]$all.youden
+  yd.df$meanV <- apply(yd.df, 1, mean)
+  print(paste0(i, ' mean Youden Index: ', mean(yd.df$meanV)))
+}
+
+for (i in names(mb.cv)) {
+  yd.df <- mb.cv[[i]]$all.youden
+  yd.df$meanV <- apply(yd.df, 1, mean)
+  print(paste0(i, ' mean Youden Index: ', mean(yd.df$meanV)))
+}
+
+
+
+fs=c('sub.01', 'sub.05', 'sub.10')
+draw.perf <- function(name) {
+  df <- data.frame(fs=fs, meanACC=rep(0, length(fs)), sdACC=rep(0, length(fs)))
+  df$meanACC <- sapply(df$fs, function(x) mean(get(paste0(name,'.cv'))[[x]][['ACC']]))
+  df$sdACC <- sapply(df$fs, function(x) sd(get(paste0(name,'.cv'))[[x]][['ACC']]))
+  print(df)
+  
+  # CV acc
+  ggplot(df, aes(x=fs, y=meanACC, group=1)) + 
+    geom_line(size=1.1, color='darkgrey') + 
+    geom_point(size=1.1) + labs(y='CV ACCs') + ggtitle(paste0(name, ' CV ACC')) +
+    geom_errorbar(aes(ymin=meanACC-sdACC, ymax=meanACC+sdACC), width=.2,
+               position=position_dodge(0.05), color='darkgrey') +
+    scale_x_discrete(limits = fs) +
+    scale_y_continuous(breaks = seq(0.6, 1, by=0.1), limits = c(0.6,1)) +
+    theme_bw()
+}
+
+
+
+```
+
+
+
+
+

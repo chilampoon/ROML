@@ -1,0 +1,238 @@
+---
+title: "CRC multi-class random forest testing"
+author: "Poon Chi Lam"
+date: "8/9/2019"
+output: html_document
+---
+
+Select features based on cross-validation
+
+- TCGA-COAD: top 10% genes with high F-scores
+- KFSYSCC: top 10% genes with high F-scores
+
+```{R setup}
+suppressPackageStartupMessages({
+  library(tidyr)
+  library(dplyr)
+  library(reshape2)
+  library(stringr)
+})
+source('~/ktsp/script/function/plot.utils.R')
+source('~/ktsp/script/function/cross.platform.norm.R')
+source('~/ktsp/script/function/multi.rf.test.R')
+```
+
+
+## Load data
+```{R}
+load('~/ktsp/CRC/TCGA.COAD.Rdata')
+load('~/ktsp/CRC/kfsyscc.CRC.Rdata')
+
+lb.coad <- factor(coad.clin$cms_label)
+lb.kf <- factor(kf.clin$cms_label)
+table(lb.coad);table(lb.kf)
+
+# genes with p-val
+load('~/ktsp/CRC/multiclass/coad.fscore.Rdata')
+coad.train <- coad.expr[match(features[["sub.10"]], rownames(coad.expr)), ]
+kf.test <- kf.expr[match(features[["sub.10"]], rownames(kf.expr)), ]
+
+load('~/ktsp/CRC/multiclass/kfsyscc.fscore.Rdata')
+kf.train <- kf.expr[match(features[["sub.10"]], rownames(kf.expr)), ]
+coad.test <- coad.expr[match(features[["sub.10"]], rownames(coad.expr)), ]
+```
+
+
+
+## TCGA as training
+### Cross-platform normalization
+```{R}
+qn.kf.test <- cross.platform.norm(data.train=coad.train, 
+                                  data.test=kf.test,
+                                  method='QN')
+
+tdm.kf.test <- cross.platform.norm(data.train=coad.train, 
+                                  data.test=kf.test,
+                                  method='TDM')
+
+```
+
+
+### Train model and testing
+```{R}
+coad.model <- multi.model(dataframe=as.data.frame(t(coad.train)), label=lb.coad)
+
+coad.res <- list()
+for (i in c('QN', 'TDM')) {
+  if (i == 'QN') {
+    nm.test <- qn.kf.test
+  } else if (i == 'TDM') {
+    nm.test <- tdm.kf.test
+  }
+  
+  coad.res[[i]] <- multi.rf.test(testdata=as.data.frame(t(nm.test)), 
+                             testlabel=lb.kf, 
+                             model=coad.model)
+  print(coad.res[[i]][["cm"]])
+}
+
+save(coad.res, file='~/ktsp/CRC/multiclass/COAD.RF.test.Rdata')
+```
+
+
+## KFSYSCC as training
+### Cross-platform normalization
+```{R}
+qn.coad.test <- cross.platform.norm(data.train=kf.train, 
+                                  data.test=coad.test,
+                                  method='QN')
+
+tdm.coad.test <- cross.platform.norm(data.train=kf.train, 
+                                  data.test=coad.test,
+                                  method='TDM')
+
+```
+
+
+### Train model and testing
+```{R}
+kf.model <- multi.model(dataframe=as.data.frame(t(kf.train)), label=lb.kf)
+
+kf.res <- list()
+for (i in c('QN', 'TDM')) {
+  if (i == 'QN') {
+    nm.test <- qn.coad.test
+  } else if (i == 'TDM') {
+    nm.test <- tdm.coad.test
+  }
+  
+  kf.res[[i]] <- multi.rf.test(testdata=as.data.frame(t(nm.test)), 
+                             testlabel=lb.coad, 
+                             model=kf.model)
+  print(kf.res[[i]][["cm"]])
+}
+
+save(kf.res, file='~/ktsp/CRC/multiclass/kfsyscc.RF.test.Rdata')
+```
+
+
+### Visualization
+```{R, fig.width=12, fig.height=4}
+## TCGA TESTING
+norm.method <- c('QN', 'TDM')
+final.plot <- data.frame()
+for (norm in norm.method) {
+  df <- data.frame(ACC=0, ACCub=0, ACClb=0, YD=0)
+  list <- coad.res[[norm]]
+  df$ACC <- list[['ACC']]
+  df$ACCub <- list[["cm"]][["overall"]][["AccuracyUpper"]]
+  df$ACClb <- list[["cm"]][["overall"]][["AccuracyLower"]]
+  df$YD <- list[["avg.yd"]]
+  df$Method <- rep(norm, nrow(df))
+  final.plot <- rbind(final.plot, df)
+}
+final.plot$Method <- paste0('RF+', final.plot$Method)
+
+# load ROML result
+load('~/ktsp/CRC/multiclass/COAD.ROML.test.m1.Rdata')
+final.plot[3,]$ACC <- coad.test.res[["1000"]][["ACC"]]
+final.plot[3,]$ACCub <- coad.test.res[["1000"]][["cm"]][["overall"]][["AccuracyUpper"]]
+final.plot[3,]$ACClb <- coad.test.res[["1000"]][["cm"]][["overall"]][["AccuracyLower"]]
+final.plot[3,]$YD <- coad.test.res[["1000"]][["avg.yd"]]
+final.plot[3,]$Method <- 'ROML-M1'
+
+load('~/ktsp/CRC/multiclass/COAD.ROML.test.m2.Rdata')
+final.plot[4,]$ACC <- coad.test.res[["100"]][["ACC"]]
+final.plot[4,]$ACCub <- coad.test.res[["100"]][["cm"]][["overall"]][["AccuracyUpper"]]
+final.plot[4,]$ACClb <- coad.test.res[["100"]][["cm"]][["overall"]][["AccuracyLower"]]
+final.plot[4,]$YD <- coad.test.res[["100"]][["avg.yd"]]
+final.plot[4,]$Method <- 'ROML-M2'
+
+final.plot$YD <- as.numeric(final.plot$YD)
+final.plot$Method <- factor(final.plot$Method, levels=as.character(final.plot$Method))
+print(final.plot)
+
+# TEST acc
+g1 <- ggplot(final.plot, aes(x=Method, y=ACC, group=Method, color=Method)) + 
+  geom_point(size=4) + labs(y='Accuracy', x='') + ggtitle(paste0('TCGA TEST ACC')) +
+  geom_errorbar(aes(ymin=ACClb, ymax=ACCub), width=.05,
+             position=position_dodge(0.05)) +
+  #scale_x_discrete(limits = norm.method) +
+  scale_y_continuous(breaks = seq(0,1, by=0.1), limits = c(0,1)) +
+  scale_color_brewer(palette='Set2') +
+  theme_bw()
+
+
+# TEST youden
+g2 <- ggplot(final.plot, aes(x=Method, y=YD, group=Method, color=Method)) + 
+  geom_point(size=4) + labs(y='Youden Index', x='') + 
+  ggtitle('TCGA Youden Index') +
+  #geom_errorbar(aes(ymin=meanYD-sdYD, ymax=meanYD+sdYD), width=.2,
+            # position=position_dodge(0.05)) +
+  #scale_x_discrete(limits = norm.method) +
+  scale_y_continuous(breaks = seq(0,1, by=0.1), limits = c(0,1)) +
+  scale_color_brewer(palette='Set2') +
+  theme_bw()
+
+ggarrange(g1, g2, ncol=2, nrow=1, common.legend = T, legend = 'right')
+```
+
+```{R, fig.width=12, fig.height=4}
+## KFSYSCC TESTING
+final.plot <- data.frame()
+for (norm in norm.method) {
+  df <- data.frame(ACC=0, ACCub=0, ACClb=0, YD=0)
+  list <- kf.res[[norm]]
+  df$ACC <- list[['ACC']]
+  df$ACCub <- list[["cm"]][["overall"]][["AccuracyUpper"]]
+  df$ACClb <- list[["cm"]][["overall"]][["AccuracyLower"]]
+  df$YD <- list[["avg.yd"]]
+  df$Method <- rep(norm, nrow(df))
+  final.plot <- rbind(final.plot, df)
+}
+final.plot$Method <- paste0('RF+', final.plot$Method)
+
+# load ROML result
+load('~/ktsp/CRC/multiclass/kfsyscc.ROML.test.m1.Rdata')
+final.plot[3,]$ACC <- kf.test.res[["300"]][["ACC"]]
+final.plot[3,]$ACCub <- kf.test.res[["300"]][["cm"]][["overall"]][["AccuracyUpper"]]
+final.plot[3,]$ACClb <- kf.test.res[["300"]][["cm"]][["overall"]][["AccuracyLower"]]
+final.plot[3,]$YD <- kf.test.res[["300"]][["avg.yd"]]
+final.plot[3,]$Method <- 'ROML-M1'
+
+load('~/ktsp/CRC/multiclass/kfsyscc.ROML.test.m2.Rdata')
+final.plot[4,]$ACC <- kf.test.res[["50"]][["ACC"]]
+final.plot[4,]$ACCub <- kf.test.res[["50"]][["cm"]][["overall"]][["AccuracyUpper"]]
+final.plot[4,]$ACClb <- kf.test.res[["50"]][["cm"]][["overall"]][["AccuracyLower"]]
+final.plot[4,]$YD <- kf.test.res[["50"]][["avg.yd"]]
+final.plot[4,]$Method <- 'ROML-M2'
+
+final.plot$YD <- as.numeric(final.plot$YD)
+final.plot$Method <- factor(final.plot$Method, levels=as.character(final.plot$Method))
+print(final.plot)
+# TEST acc
+g1 <- ggplot(final.plot, aes(x=Method, y=ACC, group=Method, color=Method)) + 
+  geom_point(size=4) + labs(y='Accuracy', x='') + ggtitle(paste0('METABRIC TEST ACC')) +
+  geom_errorbar(aes(ymin=ACClb, ymax=ACCub), width=.05,
+             position=position_dodge(0.05)) +
+  #scale_x_discrete(limits = norm.method) +
+  scale_y_continuous(breaks = seq(0,1, by=0.1), limits = c(0,1)) +
+  scale_color_brewer(palette='Set2') +
+  theme_bw()
+
+
+# TEST youden
+g2 <- ggplot(final.plot, aes(x=Method, y=YD, group=Method, color=Method)) + 
+  geom_point(size=4) + labs(y='Youden Index') + 
+  ggtitle('METABRIC Youden Index') +
+  #geom_errorbar(aes(ymin=meanYD-sdYD, ymax=meanYD+sdYD), width=.2,
+            # position=position_dodge(0.05)) +
+  #scale_x_discrete(limits = norm.method) +
+  scale_y_continuous(breaks = seq(0,1, by=0.1), limits = c(0,1)) +
+  scale_color_brewer(palette='Set2') +
+  theme_bw()
+
+ggarrange(g1, g2, ncol=2, nrow=1, common.legend = T, legend = 'right')
+```
+
+
