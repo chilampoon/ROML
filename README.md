@@ -1,4 +1,4 @@
-# Robust Rrder-based Machine Learning ROML framework
+# Robust Order-based Machine Learning ROML framework
 
 Built binary and multi-class classifiers for cancer subtypes
 
