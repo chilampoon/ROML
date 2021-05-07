@@ -1,10 +1,15 @@
-# Robust Order-based Machine Learning ROML framework
+# Robust Order-based Machine Learning (ROML) framework
+> Built binary and multi-class classifiers for cancer subtypes
 
-Built binary and multi-class classifiers for cancer subtypes
+
+## Overview
+Most algorithms operate under the assumption that the training and test data will be drawn from the same distribution. However, heterogeneity (expression shift) exists in different studies due to various sequencing platforms, protocols, materials, etc. Also, cross-platform normalization methods are not effective enough.
+
+Here we developed a general machine learning framework called Robust Order-based Machine Learning (ROML). An order-based Top Scoring Pairs method is firstly used for transforming features into 0-1 binary data based on gene pair orders. The binarized data are then filtered and input into an existing machine learning method for the final predictive model, where interpretable methods with embedded feature selection such as random forest will be preferred.
 
 
 ### Feature selecion
-- kTSP score calculation
+- [kTSP](https://academic.oup.com/bioinformatics/article/21/20/3896/203010) score calculation
 - Gene pairs are converted to 0-1 binary features
 
 ### Random Forest Models
@@ -17,7 +22,7 @@ Built binary and multi-class classifiers for cancer subtypes
 
 ### Simulation
 
-The results were not as we expected...
+Results to be interpreted...
 
 
 ### Real data application
